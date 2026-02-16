@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import router
+from api.v1.repo import token, issue
 from core.config import settings
 
 app = FastAPI(
@@ -17,7 +17,8 @@ app.add_middleware(
     allow_credentials = True
 )
 
-app.include_router(router, prefix = "/api")
+app.include_router(token.router)
+app.include_router(issue.router)
 
 @app.get("/")
 async def root():
