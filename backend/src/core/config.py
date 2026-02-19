@@ -3,6 +3,7 @@ import os
 from typing import List, Literal
 
 from dotenv import load_dotenv
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings
 
 load_dotenv(dotenv_path=pathlib.Path(__file__).parent.parent / ".env")
@@ -25,5 +26,12 @@ class Settings(BaseSettings):
     # CLAUDE_API_KEY: str = os.getenv("CLAUDE_API_KEY")
     # CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL")
     # CLAUDE_MAX_TOKENS: int = os.getenv("CLAUDE_MAX_TOKENS")
+
+    # OpenAI Settings
+    OPENAI_API_KEY: SecretStr = os.getenv("OPENAI_API_KEY")
+
+    # Pinecone Settings
+    PINECONE_API_KEY: SecretStr = os.getenv("PINECONE_API_KEY")
+    PINECONE_INDEX_NAME: str = os.getenv("PINECONE_INDEX_NAME")
 
 settings: Settings = Settings()

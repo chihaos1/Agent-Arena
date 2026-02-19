@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from github import GithubException
 
-from schemas.request.token import ValidateTokenRequest
-from schemas.response.token import ValidateTokenResponse
+from schemas.request.repo.token import ValidateTokenRequest
+from schemas.response.repo.token import ValidateTokenResponse
 from services.repo.token import get_github_repo_info
 
 router = APIRouter(prefix="/repo", tags=["repo"])
@@ -11,6 +11,12 @@ router = APIRouter(prefix="/repo", tags=["repo"])
 async def validate_token(request: ValidateTokenRequest):
     """
     Validate GitHub token and confirm repo access.
+
+    Args:
+    * request (ValidateTokenRequest): The validated request body.
+    * Attributes:
+        * github_token (SecretStr): A valid GitHub Personal Access Token.
+        * repo_name (str): Full name of the repository (e.g., 'owner/repo').
 
     Returns:
     * ValidateTokenResponse: Contains the result of the validation.

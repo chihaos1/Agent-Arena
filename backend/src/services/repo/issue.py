@@ -4,7 +4,21 @@ from github import Github, Auth
 
 def create_github_issue(token: str, repo_name: str, title: str, body: str) -> dict:
     """
+    Verifies that the authenticated user has sufficient permissions 
+    (write, admin, or maintainer) before attempting to create the issue.
 
+    Args:
+        token: A GitHub Personal Access Token (PAT) for authentication.
+        repo_name: The full name of the repository (e.g., "owner/repo").
+        title: The title of the issue to be created.
+        body: The markdown description/content of the issue.
+
+    Returns:
+        dict: A dictionary containing the issue metadata:
+            - number (int): The GitHub issue number.
+            - url (str): The web URL to view the issue.
+            - title (str): The issue title.
+            - created_at (str): ISO formatted timestamp of creation.
 
     """
 

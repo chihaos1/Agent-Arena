@@ -1,14 +1,35 @@
 from fastapi import APIRouter, HTTPException
 from github import GithubException
 
-from schemas.request.issue import CreateIssueRequest
-from schemas.response.issue import CreateIssueResponse
+from schemas.request.repo.issue import CreateIssueRequest
+from schemas.response.repo.issue import CreateIssueResponse
 from services.repo.issue import create_github_issue
 
 router = APIRouter(prefix="/repo", tags=["repo"])
 
 @router.post("/create-issue", response_model=CreateIssueResponse)
 async def create_issue(request: CreateIssueRequest):
+    """
+    Authenticate with GitHub and create a new issue in the specified repository.
+
+    Args:
+    * request (CreateIssueRequest): The validated request body.
+    * Attributes:
+        * github_token (SecretStr): A valid GitHub Personal Access Token.
+        * repo_name (str): Full name of the repository (e.g., 'owner/repo').
+        * issue_title (str): Title of the issue to be created.
+        * issue_description (str): Detailed content for the issue body.
+
+    Returns:
+    * CreateIssueResponse: Contains the detailed result of the issue creation.
+    * Attributes:
+        * success (bool): True if the issue was successfully created; False otherwise.
+        * issue_number (int): The unique identifier assigned by GitHub to the new issue.
+        * issue_url (str): The direct HTML link to the newly created issue.
+        * issue_title (str): The title of the issue as confirmed by the API.
+        * created_at (str): ISO 8601 formatted timestamp of the creation.
+        * message (str): Human-readable confirmation including the repository name.
+    """
 
     try: 
 
