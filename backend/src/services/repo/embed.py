@@ -18,30 +18,31 @@ class VectorStore:
         """Generate semantic summary of a code file using GPT-4o-mini"""
 
         prompt = f"""
-           Summarize this code in 12-18 words (strict limit).
+            Summarize in 12-18 words what this code DOES.
 
             File: {file_path}
-            Code:
-            ```
-            {content[:3000]}
-            ```
+            Code: {content[:3000]}
 
-            Rules:
-            1. START with main constant/function/class names
-            2. Use ACTION VERBS (generates, validates, processes, exports, creates, handles)
-            3. Mention what it operates on or produces
-            4. Use exact technical terms from the code
-            5. No labels, no structure, just clear description
+            **Rules:**
+            1. Start with action verb (Renders, Displays, Processes, Manages, Handles, Validates)
+            2. Include key hardcoded values (scale=2, timeout=5000, max_retries=3)
+            3. Use outcome language: what users see/get, not internal structure
+            4. For models/types: describe the entities they represent
+            5. Mention tech layer when relevant (React component, API endpoint, database schema)
 
-            Examples:
-            Bad: "Defines a system for managing data"
-            Good: "Defines USER_SCHEMA constant for validating user registration with email and password fields"
+            **Examples:**
 
-            Bad: "Handles authentication logic"  
-            Good: "Defines validateToken() and refreshSession() functions for JWT-based authentication"
+            Bad: "Exports Brain component with GLTF processing and rotation state"
+            Good: "React component that displays a 3D brain model with scale=2 and interactive rotation controls."
 
-            Bad: "Provides API endpoints"
-            Good: "Defines /api/users and /api/login routes using FastAPI router for user management"
+            Bad: "Defines API route for mind map creation"
+            Good: "API endpoint generating mind map nodes using Claude with max_tokens=4096"
+
+            Bad: "Contains User interface definition"
+            Good: "TypeScript type defining User with email, role, and subscription fields"
+
+            Bad: "Validates authentication tokens"
+            Good: "Validates JWT tokens with 300-second expiry and refresh logic"
         """
 
         response = self.openai.chat.completions.create(

@@ -58,7 +58,7 @@ async def embed_repo(request: EmbedRepoRequest):
                 if item.type == "blob" and any(item.path.endswith(ext) for ext in code_extensions)
             ]
 
-            for code_file in code_files[:5]:
+            for code_file in code_files:
                 try:
                     
                     # Get and Decode the code script content

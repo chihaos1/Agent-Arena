@@ -1,52 +1,88 @@
+from fastapi import HTTPException, status
 from github import Github, Auth
 
 from services.repo.embed import VectorStore
+from services.agents.parser import CodeParser
 
 class ContextAssembler:
     """Assemble context for issue by finding relevant files"""
 
     def __init__(self, github_token):
         self.vector_store = VectorStore()
+        self.parser = CodeParser()
         self.github_token = github_token
-        self._handlers = {
-            # ".py": self._extract_python_signatures
-            # ".ts": self._extract_typescript_signatures,
-            # ".tsx": self._extract_tsx_signatures,
-            # ".css": self._extract_css_excerpt,
-            # ".html": self._extract_html_excerpt,
-        }
 
     def assemble_context(
             self,
             query: str, 
             repo_name: str
         ):
+        """
+        Gathers a comprehensive context package for the LLM Planner.
+
+        The process follows a three-step pipeline:
+        1. Retrieval: Queries Pinecone to find the most semantically relevant file 
+           paths and summaries based on the user's issue.
+        2. Fetching: Connects to the GitHub API to retrieve the raw source code 
+           for each identified file.
+        3. Parsing: Uses Tree-sitter to extract high-level code signatures and 
+           import dependencies, creating a lightweight 'skeleton' of the codebase.
+
+        Args:
+            query: The user's natural language request or issue description.
+            repo_name: The full GitHub repository name (e.g., 'owner/repo').
+
+        Returns:
+            A dictionary containing the original query, repository language stats, 
+            and a list of file objects enriched with summaries, signatures, and imports.
+        """
 
         # Fetch the most relevant scripts' GitHub file paths from Pinecone
         relevant_files = self._search_relevant_files(query=query,repo_name=repo_name)
 
-        # Fetch the actual code files from GitHub using the file paths
+        if not relevant_files:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="No relevant code files found for this query.") 
+
         github_auth = Auth.Token(self.github_token)
 
         with Github(auth=github_auth) as github_client:
 
             # Connect to GitHub repo
             repo = github_client.get_repo(repo_name)
+            languages = repo.get_languages()
             
-            # Fetch the code content from GitHub
             for file in relevant_files:
                     
-                # Get and Decode the code script content
+                # Fetch scripts from GitHub
                 file_content_raw = repo.get_contents(file["file_path"])
                 file_content_decoded = file_content_raw.decoded_content.decode("utf-8", errors="ignore")
-                code_excerpt = self._extract_code_excerpt(file["file_path"], file_content_decoded)
+
+                # Extract code signatures from CodeParser
+                result = self.parser.extract_code_excerpt(file["file_path"], file_content_decoded)
+
+                file["signatures"] = result["signatures"]
+                file["imports"] = result["imports"]
+
+        return {
+            "issue": {
+                "query": query
+            },
+            "repo_context": {
+                "repo_name": repo_name,
+                "language_stack": list(languages.keys())
+            },
+            "files": relevant_files
+        }
 
     def _search_relevant_files(
             self, 
             query: str, 
             repo_name: str, 
             top_k: int = 10, 
-            relative_threshold: float = 0.7
+            relative_threshold: float = 0.7,
+            absolute_minimum: float = 0.35
         ) -> list[dict]:
         """
         Performs a semantic search in Pinecone and filters results using an adaptive threshold.
@@ -59,6 +95,8 @@ class ContextAssembler:
         * top_k (int): Maximum number of raw matches to retrieve from the vector store.
         * relative_threshold (float): The percentage of the top score (0.0 to 1.0) used 
             to filter out irrelevant results.
+        * absolute_minimum (float): The absolute lowest relevant score the search results 
+            need to meet.
 
         Returns:
         * list[dict]: A filtered list of relevant file objects containing metadata 
@@ -76,35 +114,22 @@ class ContextAssembler:
             include_metadata=True
         )
 
-        # Filter files based on relative scores
+        if not results.get("matches"):
+            return []
+
+        # Filter files based on relative scores or absolute minimum
         relevant_matches = []
         top_score = results["matches"][0]["score"]
-        cutoff_score = top_score * relative_threshold
-
+        relative_cutoff = top_score * relative_threshold
+        absolute_cutoff = absolute_minimum
+        cutoff_score = max(relative_cutoff, absolute_cutoff)
+        
         for result in results["matches"]:
-           if result["score"] > cutoff_score:      
+            if result["score"] > cutoff_score:      
                 relevant_matches.append({
                     "file_path": result["metadata"]["file_path"],
-                    "summary": result["metadata"]["summary"],
-                    "score": result["score"]
+                    "summary": result["metadata"]["summary"]
                 })
+                # print(result["metadata"]["file_path"], result["score"])
 
         return relevant_matches
-
-    def _extract_code_excerpt(self, file_path: str, content: str):
-        """
-        Docstring for _extract_code_excerpt
-        
-        :param self: Description
-        """
-
-        file_ext = file_path.split(".")[-1]
-
-        # Uses the parser for specific language, fall back to first 50 lines if language not found
-        handler = self._handlers.get(
-            file_ext, 
-            lambda content: "\n".join(content.splitlines()[:50])
-        )
-
-        return handler(content)
-

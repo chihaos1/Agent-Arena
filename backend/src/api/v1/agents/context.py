@@ -2,15 +2,31 @@ from fastapi import APIRouter, HTTPException
 from github import GithubException
 
 from schemas.request.agents.context import SearchContextRequest
-from schemas.response.agents.context import SearchContextResponse
+from schemas.response.agents.context import ContextAssemblerResponse
 from services.agents.context import ContextAssembler
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
-@router.post("/build-context", response_model=SearchContextResponse)
+@router.post("/build-context", response_model=ContextAssemblerResponse)
 async def build_context(request: SearchContextRequest):
     """
+    Orchestrates the retrieval and parsing of repository context for a given query.
+    Will first fetch relevant files from Pinecone then conduct code fetching and AST parsing.
 
+    Args:
+    * request (SearchContextRequest): The validated request body.
+    * Attributes:
+        * query (str): The natural language issue or request to search against.
+        * repo_name (str): Full name of the repository (e.g., 'owner/repo').
+        * github_token (SecretStr): A secure GitHub Personal Access Token.
+
+    Returns:
+    * ContextAssemblerResponse: The structured payload containing the gathered context.
+    * Attributes:
+        * issue (dict): Contains the original query for reference.
+        * repo_context (dict): Metadata including the repository name and language stack.
+        * files (list): A collection of relevant file objects, each containing a summary, 
+          top-level signatures, and import dependencies.
     """
 
     try: 
@@ -19,19 +35,13 @@ async def build_context(request: SearchContextRequest):
             github_token=request.github_token.get_secret_value()
         )
 
-        assembler.assemble_context(
+        context = assembler.assemble_context(
             query=request.query, 
             repo_name=request.repo_name
         )
 
-
-        
-        
-
-        return SearchContextResponse(
-            query=request.query,
-            # relevant_files=request.repo_name,
-            relevant_files=[""]
+        return ContextAssemblerResponse(
+            **context
         )
 
     except GithubException as e:
