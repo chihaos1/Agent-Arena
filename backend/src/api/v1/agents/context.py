@@ -3,7 +3,7 @@ from github import GithubException
 
 from schemas.request.agents.context import SearchContextRequest
 from schemas.response.agents.context import ContextAssemblerResponse
-from services.agents.context import ContextAssembler
+from services.agents.context.agent import ContextAssembler
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -41,7 +41,9 @@ async def build_context(request: SearchContextRequest):
         )
 
         return ContextAssemblerResponse(
-            **context
+            issue=context["issue"],
+            repo_context=context["repo_context"],
+            files=context["files"]
         )
 
     except GithubException as e:

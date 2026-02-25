@@ -1,26 +1,49 @@
 from fastapi import APIRouter, HTTPException
 from github import GithubException
 
-from schemas.request.agents.plan import PlanRequest
-from schemas.response.agents.plan import PlanResponse
-from services.agents.plan import PlannerAgent
-
+from schemas.request.agents.plan import ExecutionPlanRequest
+from schemas.response.agents.plan import ExecutionPlanResponse
+from services.agents.plan.agent import PlannerAgent
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
-@router.post("/plan-execution", response_model=PlanResponse)
-async def build_context(request: PlanRequest):
+@router.post("/plan-execution", response_model=ExecutionPlanResponse)
+async def plan_execution(request: ExecutionPlanRequest):
     """
+    Generates and validates of a multi-step repository edit strategy.
+    
+    This phase transitions from raw repository context to a structured roadmap, utilizing 
+    a Planner Agent to group related files and establish a dependency-aware execution order.
+
+    Args:
+    * request (ExecutionPlanRequest): The validated request body.
+    * Attributes:
+        * context (ContextAssemblerResponse): The structured context gathered from 
+          Pinecone and AST parsing.
+        * repo_name (str): Full name of the repository (e.g., 'owner/repo').
+        * github_token (SecretStr): A secure GitHub Personal Access Token.
+
+    Returns:
+    * ExecutionPlanResponse: The structured roadmap for the Coder Agents.
+    * Attributes:
+        * understanding (str): The high-level technical strategy synthesized by the AI.
+        * file_groups (list): A collection of FileGroup objects, each defining a 
+          specific set of files to be edited together.
+        * execution_order (list): A sequence of group IDs ensuring base dependencies 
+          are modified before their dependents.
     """
 
     try: 
-
-        planner = PlannerAgent()
-        planner.create_plan()
         
+        # Create and review execution plan with Planner
+        planner = PlannerAgent()
 
-        return PlanResponse(
-            query="test"
+        execution_plan = planner.create_plan()
+        
+        return ExecutionPlanResponse(
+            understanding=execution_plan["understanding"],
+            file_groups=execution_plan["file_groups"],
+            execution_order=execution_plan["execution_order"]
         )
 
     except GithubException as e:

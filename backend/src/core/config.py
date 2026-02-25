@@ -35,8 +35,8 @@ class Settings(BaseSettings):
 
     # Claude Settings
     CLAUDE_API_KEY: SecretStr
-    # CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL")
-    # CLAUDE_MAX_TOKENS: int = os.getenv("CLAUDE_MAX_TOKENS")
+    CLAUDE_MODEL: str
+    CLAUDE_MAX_TOKENS: int 
 
     # OpenAI Settings
     OPENAI_API_KEY: SecretStr

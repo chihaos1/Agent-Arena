@@ -2,7 +2,7 @@ from fastapi import HTTPException, status
 from github import Github, Auth
 
 from services.repo.embed import VectorStore
-from services.agents.parser import CodeParser
+from services.agents.context.tools.parse import CodeParser
 
 class ContextAssembler:
     """Assemble context for issue by finding relevant files"""
@@ -45,6 +45,7 @@ class ContextAssembler:
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="No relevant code files found for this query.") 
 
+        # Initialize GitHub client
         github_auth = Auth.Token(self.github_token)
 
         with Github(auth=github_auth) as github_client:
@@ -56,11 +57,11 @@ class ContextAssembler:
             for file in relevant_files:
                     
                 # Fetch scripts from GitHub
-                file_content_raw = repo.get_contents(file["file_path"])
-                file_content_decoded = file_content_raw.decoded_content.decode("utf-8", errors="ignore")
+                content_raw = repo.get_contents(file["file_path"])
+                content = content_raw.decoded_content.decode("utf-8", errors="ignore")
 
                 # Extract code signatures from CodeParser
-                result = self.parser.extract_code_excerpt(file["file_path"], file_content_decoded)
+                result = self.parser.extract_code_excerpt(file["file_path"], content)
 
                 file["signatures"] = result["signatures"]
                 file["imports"] = result["imports"]
