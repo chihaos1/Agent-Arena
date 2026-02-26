@@ -1,5 +1,5 @@
 import copy
-from typing import Dict
+from typing import Dict, List, Tuple
 
 from anthropic import Anthropic
 
@@ -29,77 +29,42 @@ def fetch_files(state: Dict) -> Dict:
 def generate_code(state: Dict) -> Dict:
     """NODE 2: Generate code with Claude using tool use."""
 
-    prompt = _build_prompt(state)
-
-    tools = [
-        {
-            "name": "generate_code",
-            "description": "Generated code files with complete contents based on user intent",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "reasoning": {
-                        "type": "string",
-                        "description": "Your analysis of how these files work together, what dependencies exist, and what imports are needed. This helps ensure consistency."
-                    },
-                    "files": {
-                        "type": "array",
-                        "description": "Array of generated files with complete contents",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "path": {
-                                    "type": "string",
-                                    "description": "The exact file path"
-                                },
-                                "content": {
-                                    "type": "string",
-                                    "description": "The complete file content"
-                                }
-                            },
-                            "required": ["path", "content"]
-                        }
-                    }
-                },
-                "required": ["reasoning", "files"]
-            }
-        }
-    ]
-
-    # Call Claude with tool use
-    client = Anthropic(api_key=settings.CLAUDE_API_KEY.get_secret_value())
-    
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=8000,
-        temperature=0,
-        tools=tools,
-        tool_choice={"type": "tool", "name": "generate_code"},
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    # Extract content
-    tool_use = next(
-        (block for block in response.content if block.type == "tool_use"),
-        None
-    )
-
-    if not tool_use:
-        return {
-            "generated_files": [],
-            "reasoning": ""
-        }
-    
-    generated_files = tool_use.input.get("files",[])
-    reasoning = tool_use.input.get("reasoning","")
+    prompt = _build_generate_code_prompt(state)
+    generated_files, reasoning = _generate_code(prompt)
     
     return {
         "generated_files": generated_files,
         "reasoning": reasoning
     }
 
-def _build_prompt(state: Dict) -> str:
-    """Build the code generation prompt."""
+def validate_code(state: Dict) -> Dict:
+    """NODE 3: Validate generated code with structural checks"""
+
+    is_valid, errors = CodeValidator.validate(
+        generated_files=state["generated_files"],
+        expected_files=state["file_group"]["files"]
+    )
+    print(f"ERRORS: {errors}")
+    return {
+        "is_valid": is_valid,
+        "errors": errors
+    }
+
+def correct_code(state: Dict) -> Dict:
+    """NODE 4: Self-correct based on validation errors."""
+
+    retry_num = state["retry_count"] + 1
+    prompt = _build_correct_code_prompt(state)
+    generated_files, reasoning = _generate_code(prompt)
+
+    return {
+        "generated_files": generated_files,
+        "reasoning": reasoning,
+        "retry_count": retry_num
+    }
+
+def _build_generate_code_prompt(state: Dict) -> str:
+    """Build the code generation prompt"""
 
     file_group = state["file_group"]
     files_section = ""
@@ -173,10 +138,102 @@ def _build_prompt(state: Dict) -> str:
 
     return prompt
 
-def validate_code(state: Dict) -> Dict:
-    """NODE 3: Validate generated code with structural checks"""
+def _build_correct_code_prompt(state: Dict) -> str:
+    """Build the code correction prompt"""
+    
+    # Aggregate errors from validations
+    errors_text = "\n".join(f"- {error}" for error in state["errors"])
 
-    CodeValidator.validate(
-        generated_files=state["generated_files"],
-        expected_files=state["file_group"]["files"]
+    # Aggregate previously generated files for context
+    previous_files = ""
+    for file in state["generated_files"]:
+        previous_files += f"\n --- {file['path']} --- \n{file['content']}"
+    
+    # Build complete prompt
+    prompt = f"""
+
+    Fix these validation errors in your previous code generation.
+
+    **Errors Found:**
+    {errors_text}
+
+    **Your Previous Reasoning:**
+    {state['reasoning']}
+
+    **Your Previous Files:**
+    {previous_files}
+
+    **Instructions:**
+    - Fix the specific errors listed above
+    - Ensure all files are complete and valid
+    - Maintain consistency across files
+
+    Use the generate_code tool to return corrected files.
+
+    """
+
+    return prompt
+
+def _generate_code(prompt: str) -> Tuple[List[Dict], str]:
+    """Generate the code based on instruction from the Planner"""
+    
+    tools = [
+        {
+            "name": "generate_code",
+            "description": "Generated code files with complete contents based on user intent",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "reasoning": {
+                        "type": "string",
+                        "description": "Your analysis of how these files work together, what dependencies exist, and what imports are needed. This helps ensure consistency."
+                    },
+                    "files": {
+                        "type": "array",
+                        "description": "Array of generated files with complete contents",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string",
+                                    "description": "The exact file path"
+                                },
+                                "content": {
+                                    "type": "string",
+                                    "description": "The complete file content"
+                                }
+                            },
+                            "required": ["path", "content"]
+                        }
+                    }
+                },
+                "required": ["reasoning", "files"]
+            }
+        }
+    ]
+
+    # Call Claude with tool use
+    client = Anthropic(api_key=settings.CLAUDE_API_KEY.get_secret_value())
+    
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=8000,
+        temperature=0,
+        tools=tools,
+        tool_choice={"type": "tool", "name": "generate_code"},
+        messages=[{"role": "user", "content": prompt}]
     )
+
+    # Extract content
+    tool_use = next(
+        (block for block in response.content if block.type == "tool_use"),
+        None
+    )
+
+    if not tool_use:
+        return [], "" 
+    
+    generated_files = tool_use.input.get("files",[])
+    reasoning = tool_use.input.get("reasoning","")
+
+    return generated_files, reasoning

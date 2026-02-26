@@ -16,9 +16,9 @@ class CoderState(TypedDict):
     reasoning: str
     
     # # Validation
-    # is_valid: bool
-    # errors: List[str]
-    # retry_count: int
+    is_valid: bool
+    errors: List[str]
+    retry_count: int
     
     # # Output
     # result: Dict

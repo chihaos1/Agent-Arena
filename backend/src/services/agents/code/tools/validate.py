@@ -13,7 +13,8 @@ class CodeValidator:
             expected_files: Expected files from plan [{"file_path": "...", "action": "..."}]
         
         Returns:
-            (is_valid, errors) tuple
+            is_valid (bool): Whether or not the code has errors
+            errors (list[str]): A list of errors captured during validations
         """
 
         errors = []
@@ -25,6 +26,12 @@ class CodeValidator:
         if generated_files:
             for file in generated_files:
                 errors.extend(CodeValidator._check_empty_content(file))
+                errors.extend(CodeValidator._check_balanced_delimiters(file))
+                errors.extend(CodeValidator._check_common_syntax_errors(file))
+                errors.extend(CodeValidator._check_for_placeholders(file))
+        
+        is_valid = len(errors) == 0
+        return is_valid, errors
 
     @staticmethod
     def _check_structure(generated_files: List[Dict], expected_files: List[Dict]) -> List[str]:
@@ -157,9 +164,9 @@ class CodeValidator:
             "// ...",
             "# TODO",
             "# FIXME",
-            "...",  # Literal ellipsis in code
-            "your_",  # your_api_key, your_function, etc.
-            "example_",  # example_value, example_function
+            "...",  
+            "your_",  
+            "example_", 
             "placeholder",
             "PLACEHOLDER",
         ]

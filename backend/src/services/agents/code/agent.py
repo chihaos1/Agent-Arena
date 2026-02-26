@@ -17,15 +17,19 @@ class CoderAgent:
     def _build_graph(self):
         """Build the LangGraph graph"""
 
+        # Nodes
         workflow = StateGraph(CoderState)
         workflow.add_node("fetch", fetch_files)
         workflow.add_node("generate", generate_code)
         workflow.add_node("validate", validate_code)
 
-        workflow.set_entry_point("fetch")
+        # Edges
         workflow.add_edge("fetch", "generate")
         workflow.add_edge("generate", "validate")
         workflow.add_edge("validate", END)
+
+        # Entry Point
+        workflow.set_entry_point("fetch")
         return workflow.compile()
 
     def run(self, file_group, understanding, issue, repo):
@@ -46,6 +50,8 @@ class CoderAgent:
         }
 
         final_state = self.graph.invoke(initial_state)
+
+        print(final_state)
 
         # fetch_files(initial_state)
 
