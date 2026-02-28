@@ -63,6 +63,27 @@ def correct_code(state: Dict) -> Dict:
         "retry_count": retry_num
     }
 
+def return_result(state: Dict) -> Dict:
+    """NODE 5: Return final result."""
+
+    if state["is_valid"]:
+        status = "success"
+        files = state["generated_files"]
+        error = None
+    else:
+        status = "failed"
+        files = []
+        error = "\n".join(state["errors"])
+
+    result = {
+        "group_id": state["file_group"]["group_id"],
+        "status": status,
+        "files": files,
+        "error": error
+    }
+
+    return {"result": result}
+
 def _build_generate_code_prompt(state: Dict) -> str:
     """Build the code generation prompt"""
 

@@ -45,4 +45,8 @@ class Settings(BaseSettings):
     PINECONE_API_KEY: SecretStr
     PINECONE_INDEX_NAME: str
 
+    # Celery Settings
+    CELERY_BROKER_URL: str
+    CELERY_RESULT_BACKEND: str
+
 settings: Settings = Settings()

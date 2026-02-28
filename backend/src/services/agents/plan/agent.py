@@ -86,7 +86,7 @@ class PlannerAgent:
             messages=messages
         )
 
-        reflected_plan: ExecutionPlanResponse = self._extract_plan(response)
+        reflected_plan: dict = self._extract_plan(response)
 
         return reflected_plan
     

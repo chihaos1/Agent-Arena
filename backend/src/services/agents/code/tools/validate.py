@@ -59,7 +59,8 @@ class CodeValidator:
             errors.append(f"Missing files: {", ".join(sorted(missing_file))}")
         
         extra_files = actual_files - expected_files
-        if expected_files:
+        print(f"EXTRA_FILE: {extra_files}")
+        if extra_files:
             errors.append(f"Unexpected files: {", ".join(sorted(extra_files))}")
         
         return errors
