@@ -32,6 +32,7 @@ def create_workflow_state(
     state = {
         "workflow_id": workflow_id,
         "status": "running",
+        "sandbox_result": "",
         "execution_plan": execution_plan,
         "issue_description": issue_description,
         "repo_name": repo_name,
@@ -54,6 +55,23 @@ def get_workflow_state(workflow_id: str) -> Optional[Dict]:
     if data:
         return json.loads(data)
     return None
+
+def update_workflow_state(
+    workflow_id: str,
+    status: str,
+    sandbox_result: str
+) -> None:
+    """Update the workflow's status"""
+
+    state = get_workflow_state(workflow_id)
+    if not state:
+        return 
+    
+    state["status"] = status
+    state["sandbox_result"] = sandbox_result
+
+    key = f"workflow:{workflow_id}"
+    redis_client.set(key, json.dumps(state))
 
 def update_group_status(
     workflow_id: str,
@@ -79,20 +97,6 @@ def update_group_status(
         state['groups'][group_id]['result'] = result
     
     state["updated_at"] = datetime.now(timezone.utc).timestamp()
-
-    # Check if all groups are done
-    all_done = all(
-        group["status"] in ['completed', 'failed']
-        for group in state["groups"].values()
-    )
-
-    # Check if any groups failed and finalized status
-    if all_done:
-        any_failed = any(
-            group['status'] == 'failed'
-            for group in state["groups"].values()
-        )
-        state["status"] = "failed" if any_failed else "completed"
 
     key = f"workflow:{workflow_id}"
     redis_client.set(key, json.dumps(state))
