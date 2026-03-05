@@ -1,8 +1,15 @@
+import base64
+import logging
+from typing import Dict, Set
+
 from fastapi import HTTPException, status
 from github import Github, Auth
+from github.Repository import Repository
 
 from services.repo.embed import VectorStore
 from services.agents.context.tools.parse import CodeParser
+
+logger = logging.getLogger(__name__)
 
 class ContextAssembler:
     """Assemble context for issue by finding relevant files"""
@@ -53,6 +60,9 @@ class ContextAssembler:
             # Connect to GitHub repo
             repo = github_client.get_repo(repo_name)
             languages = repo.get_languages()
+
+            # Fetch project manifest files
+            manifests = self._fetch_manifests(repo)
             
             for file in relevant_files:
                     
@@ -74,7 +84,8 @@ class ContextAssembler:
                 "repo_name": repo_name,
                 "language_stack": list(languages.keys())
             },
-            "files": relevant_files
+            "files": relevant_files,
+            "manifests": manifests 
         }
 
     def _search_relevant_files(
@@ -131,6 +142,90 @@ class ContextAssembler:
                     "file_path": result["metadata"]["file_path"],
                     "summary": result["metadata"]["summary"]
                 })
-                # print(result["metadata"]["file_path"], result["score"])
 
         return relevant_matches
+
+    def _search_repo_tree(self, repo: Repository, target_filenames: Set[str]) -> Dict:
+        """
+        Search repository tree for files by exact filename.
+        
+        Finds files at any depth in the repository that match the given filenames.
+        
+        Args:
+            repo: GitHub repository object
+            target_filenames: Exact filenames to find (e.g., {"package.json", "go.mod"})
+        
+        Returns:
+            Dictionary mapping file paths to their content
+        """
+
+        repo_name = repo.full_name
+        results = {}
+
+        try: 
+            default_branch = repo.default_branch
+            logger.info(f"Searching {repo_name} for: {target_filenames} in {default_branch}")
+
+            #  1. Get the full tree map
+            tree = repo.get_git_tree(default_branch, recursive=True)
+
+            #  2. Iterate once to fetch filename and file content
+            for item in tree.tree:
+                if item.type == "blob":
+                    filename = item.path.split("/")[-1]
+
+                    if filename in target_filenames:
+                        
+                        try:
+                            blob = repo.get_git_blob(item.sha)
+                            content = base64.b64decode(blob.content)
+
+                            blob = repo.get_git_blob(item.sha)
+                            raw_content = base64.b64decode(blob.content)
+
+                            # Detect encoding
+                            try:
+                                content = raw_content.decode("utf-8")
+                            except UnicodeDecodeError:
+                                try:
+                                    content = raw_content.decode("utf-16")
+                                    logger.info(f"{item.path} (UTF-16 encoding detected)")
+                                except UnicodeDecodeError:
+                                    content = raw_content.decode("latin-1", errors="ignore")
+                                    logger.warning(f"{item.path} (unknown encoding, using latin-1)")
+
+                            results[item.path] = content
+
+                            logger.info(f"Fetched {item.path} (SHA: {item.sha[:7]})")
+
+                        except Exception as e:
+                            logger.error(f"Failed to fetch blob for {item.path}: {e}")
+            
+            return results
+
+        except Exception as e:
+            logger.error(f"Tree search failed for {repo_name}: {e}")
+
+    def _fetch_manifests(self, repo: Repository):
+        """Fetch project manifest files using _search_repo_tree"""
+
+        manifest_filenames = {
+
+            # Primary manifests
+            'package.json',        
+            'requirements.txt',    
+            'pyproject.toml',
+            'go.mod',              
+            'Cargo.toml',          
+            
+            # Build configs
+            'tsconfig.json',
+            'vite.config.ts',
+            'eslint.config.js',
+            
+            # Infrastructure
+            'Dockerfile',
+            'docker-compose.yml',
+        }
+
+        return self._search_repo_tree(repo, manifest_filenames)

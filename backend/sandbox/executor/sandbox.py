@@ -10,13 +10,6 @@ from docker.models.containers import Container
 
 logger = logging.getLogger(__name__)
 
-RUNTIME_IMAGES = {
-    "node": "node:18-slim",
-    "python": "python:3.11-slim",
-    "go": "golang:1.21-alpine",
-    "java": "openjdk:17-slim"
-}
-
 class ReviewerSandbox:
     """Executes code in an isolated Docker container"""
 
@@ -32,13 +25,10 @@ class ReviewerSandbox:
     def execute(
         self,
         generated_files: List[Dict[str, str]],
-        commands: List[str],
+        commands: str,
         workflow_id: str,
         repo_name: str,
-        github_token: str,
-        repo_branch: str = "main",
-        runtime: str = "node",
-        timeout: int = 300
+        github_token: str
     ) -> Dict:
         """
         Execute code in a Docker container with full repo context.
@@ -49,9 +39,7 @@ class ReviewerSandbox:
             workflow_id: Workflow identifier
             repo_url: Git repo URL (e.g., "github.com/user/repo")
             github_token: GitHub personal access token
-            repo_branch: Branch to checkout (default: "main")
             runtime: Runtime environment ("node", "python", "go")
-            timeout: Max execution time in seconds (default: 300)
         
         Returns:
             {
@@ -66,7 +54,6 @@ class ReviewerSandbox:
         start_time = time.time()
         temp_dir = None
         container = None
-        image_tag = None
 
         try:
             logger.info(f"Starting sandbox execution")
@@ -78,21 +65,7 @@ class ReviewerSandbox:
             temp_dir = tempfile.mkdtemp(prefix=f"sandbox_{workflow_id}_")
             logger.info(f"Created temp directory: {temp_dir}")
 
-            # ===== 2. Create Dockerfile with GitHub auth =====
-            dockerfile_content = self._create_dockerfile(
-                runtime=runtime,
-                repo_name=repo_name,
-                github_token=github_token,
-                repo_branch=repo_branch
-            )
-            dockerfile_path = os.path.join(temp_dir, 'Dockerfile')
-
-            with open(dockerfile_path, "w") as file:
-                file.write(dockerfile_content)
-
-            logger.info(f"\tCreated Dockerfile for runtime: {runtime}")
-
-            # ===== 3. Write generated files to temp dir =====
+            # ===== 2. Write generated files to temp dir =====
             generated_files_dir = os.path.join(temp_dir, 'generated')
             os.makedirs(generated_files_dir, exist_ok=True)
 
@@ -100,101 +73,99 @@ class ReviewerSandbox:
                 file_path = os.path.join(generated_files_dir, file["path"])
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-                with open(file_path, "w", encoding="utf-8") as file:
-                    file.write(file["content"])
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(file["content"])
                 
                 logger.debug(f"\tWrote: {file['path']}")
             
             logger.info(f"Wrote {len(generated_files)} files to /generated folder")
 
-            # ===== 4. Build Docker image =====
-            image_tag = f"sandbox-{workflow_id}".lower().replace('_', '-')
-            logger.info(f"Building Docker image: {image_tag}")
+            # ===== 3. Use universal image =====
+            image_name = "autodev-universal:latest"
 
             try:
-                image, build_logs = self.client.images.build(
-                    path=temp_dir,
-                    tag=image_tag,
-                    rm=True,
-                    forcerm=True,
-                    timeout=300
-                )
-                logger.info(f"Image built: {image.short_id}")
-            except docker.errors.BuildError as e:
-                logger.error(f"Docker build failed")
-                build_log = "\n".join([line.get('stream', '') for line in e.build_log if 'stream' in line])
+                self.client.images.get(image_name)
+                logger.info(f"Using existing image: {image_name}")
+            except docker.errors.ImageNotFound:
+                logger.error(f"Image {image_name} not found. Please build it first.")
                 return {
                     "success": False,
-                    "logs": f"Docker build failed:\n{build_log}",
+                    "logs": f"Universal image not found. Run: docker build -f Dockerfile.universal -t autodev-universal:latest .",
                     "exit_code": 1,
-                    "duration_ms": int((time.time() - start_time) * 1000),
-                    "files_tested": len(generated_files)
+                    "duration_ms": int((time.time() - start_time) * 1000)
                 }
 
-            # ===== 5. Run container =====
+            # ===== 4. Start container from universal image =====
             logger.info(f"Starting container...")
             
-            container = self.client.containers.run(
-                image=image_tag,
-                command="/bin/sh",
+            container: Container = self.client.containers.run(
+                image=image_name,
+                command="/bin/bash",
                 detach=True,
                 tty=True,
-                mem_limit="1g",
-                network_mode="bridge",
-                remove=False
+                stdin_open=True,
+                volumes={
+                    generated_files_dir: {'bind': '/app/generated', 'mode': 'ro'}
+                },
+                working_dir="/app",
+                mem_limit="2g"
             )
 
             logger.info(f"\tContainer started: {container.short_id}")
 
-            # ===== 6. Execute commands sequentially =====
-            all_logs = []
-            final_exit_code = 0
+            # ===== 5. Clone repository with GitHub token =====
+            branch = "main"
+            clone_url = f"https://{github_token}@github.com/{repo_name}.git"
 
-            for i, cmd in enumerate(commands, 1):
-                logger.info(f"\t\tCommand {i}/{len(commands)}: {cmd[:60]}...")
+            logger.info(f"\tCloning {repo_name} (branch: {branch})...")
 
-                try:
-                    exit_code, output = container.exec_run(
-                        f"/bin/sh -c {cmd}",
-                        demux=False,
-                        stream=False
-                    )
+            clone_cmd = f"git clone --depth 1 --branch {branch} {clone_url} /app/repo"
+            exit_code, output = container.exec_run(clone_cmd)
 
-                    output_str = output.decode("utf-8", errors="replace") if isinstance(output, bytes) else str(output)
-                    
-                    all_logs.append(f"\n{"="*70}\n")
-                    all_logs.append(f"Command {i}/{len(commands)}: {cmd}\n")
-                    all_logs.append(f"Exit Code: {exit_code}\n")
-                    all_logs.append(f"{'='*70}\n")
-                    all_logs.append(output_str)
-
-                    if exit_code != 0:
-                        logger.warning(f"\t\t\tCommand failed with exit code {exit_code}")
-                        final_exit_code = exit_code
-                        break
-                    else:
-                        logger.info(f"\t\t\tCommand succeeded")
-
-                except Exception as e:
-                    logger.error(f"\t\t\tCommand execution error: {e}")
-                    all_logs.append(f"\nError executing command: {str(e)}\n")
-                    final_exit_code = 1
-                    break
+            if exit_code != 0:
+                logger.error(f"Git clone failed: {output.decode()}")
+                return {
+                    "success": False,
+                    "logs": f"Failed to clone repository:\n{output.decode()}",
+                    "exit_code": exit_code,
+                    "duration_ms": int((time.time() - start_time) * 1000)
+                }
             
-            # ===== 7. Consolidate logs =====
-            full_logs = "".join(all_logs)
+            logger.info(f"\tRepository cloned")
+
+            # ===== 6. Copy generated files into repo =====
+            logger.info("\tCopying generated files into repo...")
+
+            copy_cmd = "cp -rf /app/generated/* /app/repo/ 2>/dev/null || true"
+            container.exec_run(copy_cmd)
+
+            # ===== 7. Execute the chained command =====
+            logger.info(f"Executing command chain...")
+            logger.info(f"\tCommand: {commands}")
+
+            exit_code, output = container.exec_run(
+                f"/bin/bash -c '{commands}'",
+                workdir="/app/repo"
+            )
+
+            if exit_code != 0:
+                logger.error(f"Command execution failed: {output.decode()}")
+
+            output = output.decode("utf-8", errors="ignore")
+
+            # ===== 9. Prepare result =====
             duration_ms = int((time.time() - start_time) * 1000)
-            success = (final_exit_code == 0)
+            success = exit_code == 0
             
             logger.info(f"Execution complete:")
             logger.info(f"Success: {success}")
-            logger.info(f"Exit Code: {final_exit_code}")
+            logger.info(f"Exit Code: {exit_code}")
             logger.info(f"Duration: {duration_ms}ms")
             
             return {
                 "success": success,
-                "logs": full_logs,
-                "exit_code": final_exit_code,
+                "logs": output,
+                "exit_code": exit_code,
                 "duration_ms": duration_ms,
                 "files_tested": len(generated_files)
             }
@@ -212,50 +183,9 @@ class ReviewerSandbox:
             }
             
         finally:
-            self._cleanup(temp_dir, container, image_tag)
+            self._cleanup(temp_dir, container)
     
-    def _create_dockerfile(
-        self,
-        runtime: str,
-        repo_name: str,
-        github_token: str,
-        repo_branch: str = "main"
-    ) -> str:
-        """Create Dockerfile with GitHub authentication"""
-
-        # Get base image
-        base_image = RUNTIME_IMAGES.get(runtime, "node:18-slim")
-        
-        # Create GitHub clone URL
-        github_auth_url = f'https://{github_token}@github.com/{repo_name}.git'
-
-        dockerfile = f"""
-            FROM {base_image}
-
-            # Install git
-            RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-
-            WORKDIR /app
-
-            # Clone repository with authentication
-            RUN git clone --depth 1 --branch {repo_branch} {github_auth_url} /app/repo
-
-            # Copy generated files
-            COPY generated /app/generated
-
-            # Overwrite repo files with generated versions
-            RUN cp -rf /app/generated/* /app/repo/ 2>/dev/null || true
-
-            # Set working directory to repo
-            WORKDIR /app/repo
-
-            # Default command
-            CMD ["/bin/sh"]
-        """
-
-        return dockerfile
-
-    def _cleanup(self, temp_dir: str, container: Container, image_tag: str) -> None:
+    def _cleanup(self, temp_dir: str, container: Container) -> None:
         """Clean up temporary directory and Docker resources"""
 
         # Remove container
@@ -267,15 +197,6 @@ class ReviewerSandbox:
                 logger.info(f"\tContainer removed")
             except Exception as e:
                 logger.warning(f"\t\tContainer cleanup failed: {e}")
-
-        # Remove image
-        if image_tag:
-            try:
-                logger.info(f"\tRemoving image: {image_tag}")
-                self.client.images.remove(image_tag, force=True)
-                logger.info(f"\tImage removed")
-            except Exception as e:
-                logger.warning(f"\t\tImage cleanup failed: {e}")
 
         # Remove temp directory
         if temp_dir and os.path.exists(temp_dir):

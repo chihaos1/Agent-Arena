@@ -1,4 +1,5 @@
 import json
+import logging
 import redis
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -9,6 +10,8 @@ redis_client = redis.Redis.from_url(
     settings.CELERY_BROKER_URL,
     decode_responses=True
 )
+
+logger = logging.getLogger(__name__)
 
 def create_workflow_state(
     workflow_id: str,
@@ -29,6 +32,7 @@ def create_workflow_state(
             "result": None
         }
     
+    sandbox_config = execution_plan.get("sandbox_config", {})
     state = {
         "workflow_id": workflow_id,
         "status": "running",
@@ -38,13 +42,20 @@ def create_workflow_state(
         "repo_name": repo_name,
         "github_token": github_token,
         "groups": groups,
+        "runtimes": sandbox_config.get("runtimes", []),
+        "setup_commands": sandbox_config.get("setup_commands", []),
+        "test_commands": sandbox_config.get("test_commands", []),
         "created_at": datetime.now(timezone.utc).timestamp(),
         "updated_at": datetime.now(timezone.utc).timestamp()
     }
-    print(f"REDIS STATE {state}")
+
     key = f"workflow:{workflow_id}"
+    logger.info(f"Workflow Key: {key}")
+
     redis_client.set(key, json.dumps(state))
     redis_client.expire(key, 86400)
+
+    logger.info(f"Workflow State: {state}")
 
 def get_workflow_state(workflow_id: str) -> Optional[Dict]:
     """Get workflow state from Redis"""

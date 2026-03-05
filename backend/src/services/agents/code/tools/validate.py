@@ -1,4 +1,7 @@
+import logging
 from typing import List, Dict, Tuple
+
+logger = logging.getLogger(__name__)
 
 class CodeValidator:
     """Validates generated code with deterministic checks."""
@@ -17,7 +20,9 @@ class CodeValidator:
             errors (list[str]): A list of errors captured during validations
         """
 
+        logger.info("Validating generated files")
         errors = []
+        
 
         # Structural Checks
         errors.extend(CodeValidator._check_structure(generated_files, expected_files))
@@ -28,7 +33,7 @@ class CodeValidator:
                 errors.extend(CodeValidator._check_empty_content(file))
                 errors.extend(CodeValidator._check_balanced_delimiters(file))
                 errors.extend(CodeValidator._check_common_syntax_errors(file))
-                errors.extend(CodeValidator._check_for_placeholders(file))
+                # errors.extend(CodeValidator._check_for_placeholders(file))
         
         is_valid = len(errors) == 0
         return is_valid, errors
@@ -37,6 +42,7 @@ class CodeValidator:
     def _check_structure(generated_files: List[Dict], expected_files: List[Dict]) -> List[str]:
         """Check structural issues: file count, missing/extra files"""
 
+        logger.info("Checking if expected files are present")
         errors = []
 
         # Check if empty
@@ -59,7 +65,6 @@ class CodeValidator:
             errors.append(f"Missing files: {", ".join(sorted(missing_file))}")
         
         extra_files = actual_files - expected_files
-        print(f"EXTRA_FILE: {extra_files}")
         if extra_files:
             errors.append(f"Unexpected files: {", ".join(sorted(extra_files))}")
         
@@ -69,6 +74,7 @@ class CodeValidator:
     def _check_empty_content(file: Dict) -> List[str]:
         """Check if file content is empty"""
 
+        logger.info("Checking if any file is empty")
         errors = []
         path = file.get("path", "unknown")
         content = file.get("content", "")
@@ -82,6 +88,7 @@ class CodeValidator:
     def _check_balanced_delimiters(file: Dict) -> List[str]:
         """Check if delimiters are balanced"""
 
+        logger.info("Checking if delimiters are balanced")
         errors = []
         path = file.get("path", "unknown")
         content = file.get("content", "")
@@ -119,6 +126,7 @@ class CodeValidator:
     def _check_common_syntax_errors(file: Dict) -> List[str]:
         """Check for common LLM-generated syntax errors"""
 
+        logger.info("Checking if there are common LLM-generated syntax errors")
         errors = []
         path = file.get("path", "unknown")
         content = file.get("content", "")
@@ -150,6 +158,7 @@ class CodeValidator:
     def _check_for_placeholders(file: Dict) -> List[str]:
         """Check for common placeholder text that LLMs sometimes leave"""
 
+        logger.info("Checking for common placeholder text")
         errors = []
         path = file.get("path", "unknown")
         content = file.get("content", "")

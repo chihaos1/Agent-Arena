@@ -1,4 +1,4 @@
-from typing import Annotated, List
+from typing import Annotated, Any, Dict, List
 
 from pydantic import BaseModel, Field
 
@@ -67,3 +67,12 @@ class ContextAssemblerResponse(BaseModel):
     issue: IssueModel
     repo_context: RepoContextModel
     files: List[FileContextModel]
+    manifests: Annotated[
+        Dict[str, Any],
+        Field(
+            description="Project manifest files (package.json, requirements.txt, etc.) mapped by file path to content. Used for runtime detection and dependency analysis.",
+            examples=[{
+                "backend/requirements.txt": "flask==2.0.0\npytest==7.0.0",
+            }]
+        )
+    ]

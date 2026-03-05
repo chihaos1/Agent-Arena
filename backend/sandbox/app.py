@@ -46,7 +46,6 @@ def execute():
         workflow_id = data.get('workflow_id', 'unknown')
         repo_name = data.get('repo_name')
         github_token = data.get('github_token')
-        runtime = data.get('runtime', 'node')
 
         # Validate required fields
         if not repo_name:

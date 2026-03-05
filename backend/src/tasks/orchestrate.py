@@ -1,3 +1,4 @@
+import logging
 import requests
 from celery import Task
 
@@ -11,6 +12,7 @@ from .state import (
 )
 
 SANDBOX_URL = "http://localhost:5001"
+logger = logging.getLogger(__name__)
 
 def _merge_all_files(state: dict) -> list:
     """Merge all generated files from all groups."""
@@ -19,22 +21,38 @@ def _merge_all_files(state: dict) -> list:
     for group_state in state["groups"].values():
         if group_state.get("result") and group_state['result'].get('files'):
             all_files.extend(group_state['result']['files'])
+
+    logger.info("All files merged")
     return all_files
 
 def _send_to_sandbox(workflow_id: str, all_files: list, state: dict) -> None:
     """Send merged files to sandbox for testing and update workflow status."""
 
     try:
+        
+        # Aggregate the commands
+        setup_cmds = state.get("setup_commands", [])
+        test_cmds = state.get("test_commands", [])
+        all_cmds = setup_cmds + test_cmds
+        all_cmds_subshells = [f"({cmd})" for cmd in all_cmds]
+        final_cmds = " && ".join(all_cmds_subshells)
+
+        logger.info(f"Commands to run in Sandbox {all_cmds_subshells}")
+
+        # Get the runtimes
+        runtimes = state.get("runtimes", ["node"])
+        logger.info(f"Runtime in Sandbox {runtimes}")
+
         payload = {
             "files": all_files,
-            "commands": ["npm install", "npm run build", "npm test"],
+            "commands": final_cmds,
             "workflow_id": workflow_id,
             "repo_name": state['repo_name'],
             "github_token": state['github_token'],
-            "runtime": "node"
+            "runtime": runtimes
         }
         
-        print(f"Sending {len(all_files)} files to sandbox...")
+        logger.info(f"Sending {len(all_files)} files to sandbox...")
         
         response = requests.post(
             f"{SANDBOX_URL}/execute",
@@ -43,7 +61,7 @@ def _send_to_sandbox(workflow_id: str, all_files: list, state: dict) -> None:
         )
         
         sandbox_result = response.json()
-        print(f"Sandbox result: success={sandbox_result.get('success')}")
+        logger.info(f"Sandbox result: success={sandbox_result.get('success')}")
 
         # Update workflow with sandbox results
         final_status = 'completed' if sandbox_result.get('success') else 'failed'
@@ -53,7 +71,7 @@ def _send_to_sandbox(workflow_id: str, all_files: list, state: dict) -> None:
             sandbox_result=sandbox_result
         )
         
-        print(f"Workflow marked as {final_status}")
+        logger.info(f"Workflow marked as {final_status}")
         
     except Exception as e:
         print(f"Sandbox error: {e}")
@@ -76,7 +94,7 @@ def _dispatch_coder_groups(state: dict, workflow_id: str, ready_groups: list) ->
         )
     
         if not file_group:
-            print(f"Group {group_id} not found")
+            logging.info(f"Group {group_id} not found")
             continue
         
         task = process_file_group.apply_async(
@@ -97,7 +115,7 @@ def _dispatch_coder_groups(state: dict, workflow_id: str, ready_groups: list) ->
             task_id=task.id
         )
 
-        print(f"Dispatched {group_id} (task: {task.id})")
+        logger.info(f"Dispatched {group_id} (task: {task.id})")
 
 @celery_app.task(name="orchestrate", bind=True)
 def orchestrate_workflow(self: Task, workflow_id: str) -> None:
@@ -116,11 +134,11 @@ def orchestrate_workflow(self: Task, workflow_id: str) -> None:
 
     # ===== 1. Check workflow state =====
     if not state:
-        print(f"Workflow {workflow_id} not found in Redis")
+        logger.warning(f"Workflow {workflow_id} not found in Redis")
         return
     
     if state['status'] in ['completed', 'failed']:
-        print(f"Workflow {workflow_id} already {state['status']}")
+        logger.warning(f"Workflow {workflow_id} already {state['status']}")
         return
     
     # ===== 2. Check if all groups are done =====
@@ -131,7 +149,7 @@ def orchestrate_workflow(self: Task, workflow_id: str) -> None:
 
     if all_done:
 
-        print(f"All groups completed - merging files and sending to sandbox")
+        logger.info(f"All groups completed - merging files and sending to sandbox")
 
         # If coding groups are done, send to sandbox for review
         all_files = _merge_all_files(state)
@@ -145,7 +163,7 @@ def orchestrate_workflow(self: Task, workflow_id: str) -> None:
     )
     
     if any_failed:
-        print(f"Groups failed - workflow failed")
+        logger.warning(f"Groups failed - workflow failed")
         update_workflow_state(workflow_id, status='failed', sandbox_result=None)
         return
     
@@ -153,14 +171,14 @@ def orchestrate_workflow(self: Task, workflow_id: str) -> None:
     ready_groups = get_ready_groups(workflow_id)
 
     if not ready_groups:
-        print(f"No groups ready yet for workflow {workflow_id}")
+        logger.warning(f"No groups ready yet for workflow {workflow_id}")
         return
     
-    print(f"Dispatching {len(ready_groups)} groups: {ready_groups}")
+    logger.info(f"Dispatching {len(ready_groups)} groups: {ready_groups}")
 
     _dispatch_coder_groups(state, workflow_id, ready_groups)
     
-    print(f"Waiting for callbacks...")
+    logger.info(f"Waiting for callbacks...")
 
 @celery_app.task(name="mark_complete", bind=True)
 def mark_complete(self: Task, result: dict, workflow_id: str, group_id: str) -> None:
@@ -172,7 +190,7 @@ def mark_complete(self: Task, result: dict, workflow_id: str, group_id: str) -> 
     2. Triggers the brain to check for newly ready groups
     """
 
-    print(f"Group completed: {group_id} (workflow: {workflow_id})")
+    logger.info(f"Group completed: {group_id} (workflow: {workflow_id})")
 
     # Determine status based on result
     status = "completed" if result.get("status") == "success" else "failed"
@@ -184,5 +202,5 @@ def mark_complete(self: Task, result: dict, workflow_id: str, group_id: str) -> 
         result=result
     )
 
-    print(f"Triggering orchestrator to check for next groups...")
+    logger.info(f"Triggering orchestrator to check for next groups...")
     orchestrate_workflow.delay(workflow_id)

@@ -1,17 +1,16 @@
+import logging
 import uuid
 from fastapi import APIRouter, HTTPException
-from github import Github, Auth, GithubException
-from github.Repository import Repository
+from github import GithubException
 
-from schemas.response.agents.context import ContextAssemblerResponse
 from schemas.request.agents.orchestrate import OrchestrateRequest
 from schemas.response.agents.orchestrate import OrchestrateResponse
-from schemas.response.agents.plan import ExecutionPlanResponse
-from services.agents.code.agent import CoderAgent
 from services.agents.context.agent import ContextAssembler
 from services.agents.plan.agent import PlannerAgent
 from tasks.orchestrate import orchestrate_workflow
 from tasks.state import create_workflow_state
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -36,19 +35,24 @@ async def orchestrate(request: OrchestrateRequest):
         #     github_token=request.github_token.get_secret_value()
         # )
 
-        # context: ContextAssemblerResponse = assembler.assemble_context(
+        # context = assembler.assemble_context(
         #     query=request.query, 
         #     repo_name=request.repo_name
         # )
-        # print(f"CONTEXT GOT")
+
+        # logger.info(f"Context fetched: {context}")
+
         # # 2. Create and review execution plan with Planner (passes execution plan to Planner)
         # planner = PlannerAgent()
         # execution_plan: dict = planner.create_plan(context)
-        execution_plan = {'understanding': 'The issue requires adding the ability to change node colors. Currently, Node.tsx has hardcoded colors. The most essential approach is to: 1) Add a color property to the node data model, 2) Modify Node.tsx to use dynamic colors from props, and 3) Add a simple color picker in the node detail/edit interface. I should focus on the minimal files needed to make nodes changeable colors work.', 'file_groups': [{'group_id': 'node-color-support', 'description': 'Add color support to node data model and rendering', 'files': [{'file_path': 'frontend/src/models/Graph.ts', 'action': 'modify', 'changes': 'Add optional color property to GraphNode interface with default color value', 'reason': 'Need to store color information in the node data structure'}, {'file_path': 'frontend/src/components/3d/graph/Node.tsx', 'action': 'modify', 'changes': "Replace hardcoded color '#C5C2A8' with node.color property, add fallback to default color if not specified", 'reason': 'Core rendering component needs to use dynamic colors from node data'}], 'dependencies': [], 'can_parallelize': False}, {'group_id': 'color-picker-ui', 'description': 'Add color picker interface for node editing', 'files': [{'file_path': 'frontend/src/components/ui/ColorPicker/ColorPicker.tsx', 'action': 'create', 'changes': 'Create simple color picker with predefined color swatches and onChange callback', 'reason': 'Need UI component to allow users to select node colors'}], 'dependencies': ['node-color-support'], 'can_parallelize': True}], 'execution_order': ['node-color-support', 'color-picker-ui']}
-        print(execution_plan)
+
+        # logger.info(f"Execution Plan generated: {execution_plan}")
+
+        execution_plan = {'understanding': 'The issue requires adding the ability for nodes to change colors. Looking at the existing Node.tsx component, I can see it currently has a hardcoded color "#C5C2A8" for the mesh material and uses a `color` prop for the line material. To implement color changing functionality, I need to:\n\n1. Add a color picker UI component to allow users to select colors\n2. Modify the Node component to accept and use dynamic colors\n3. Update the GraphNode model to include a color property\n4. Integrate the color picker into the node interaction flow\n\nThe minimal approach focuses on the core functionality: a color picker component and modifications to the existing Node component to support dynamic colors.', 'file_groups': [{'group_id': 'data-model-update', 'description': 'Update GraphNode model to support color property', 'files': [{'file_path': 'frontend/src/models/Graph.ts', 'action': 'modify', 'changes': 'Add optional color property to GraphNode interface with default color value.', 'reason': 'Need to extend the data model to store node colors - this is the foundation that other components depend on'}], 'dependencies': [], 'can_parallelize': True}, {'group_id': 'color-picker-and-node', 'description': 'Create color picker component and integrate with Node component', 'files': [{'file_path': 'frontend/src/components/ui/ColorPicker/ColorPicker.tsx', 'action': 'create', 'changes': 'Create a color picker component with predefined color palette and custom color input. Include props for current color, onChange callback, and visibility control.', 'reason': 'Need a UI component to allow users to select colors for nodes'}, {'file_path': 'frontend/src/components/ui/ColorPicker/ColorPicker.css', 'action': 'create', 'changes': 'Add styling for color picker component including color palette grid, color swatches, and custom color input field.', 'reason': 'Styling needed for the color picker component'}, {'file_path': 'frontend/src/components/3d/graph/Node.tsx', 'action': 'modify', 'changes': "Import ColorPicker component, add color state management, update mesh materials to use dynamic color from node.color property instead of hardcoded '#C5C2A8', add right-click context menu or double-click handler to show color picker.", 'reason': 'Core component that needs to support color changing functionality and imports the ColorPicker'}], 'dependencies': ['data-model-update'], 'can_parallelize': False}], 'execution_order': ['data-model-update', 'color-picker-and-node'], 'sandbox_config': {'runtimes': ['python', 'node'], 'setup_commands': ['cd backend && pip install -e .', 'cd frontend && npm install'], 'test_commands': ['cd frontend && npm run build']}}
 
         # 3. Execute the execution plan with Coder
         workflow_id = str(uuid.uuid4())
+        
         create_workflow_state(
             workflow_id=workflow_id,
             execution_plan=execution_plan,
@@ -56,17 +60,10 @@ async def orchestrate(request: OrchestrateRequest):
             repo_name=request.repo_name,
             github_token=request.github_token.get_secret_value()
         )
+        logger.info(f"Current Workflow ID: {workflow_id}")
 
-        print("Triggering orchestrator...")
         orchestrate_workflow.delay(workflow_id)
-        print(f"✅ Workflow {workflow_id} started")
-
-        # github_auth = Auth.Token(request.github_token.get_secret_value())
-        # github_client = Github(auth=github_auth)
-        # repo: Repository = github_client.get_repo(request.repo_name) # change to pass token and repo name when using celery
-
-        # coder = CoderAgent()
-        # coder.run(execution_plan["file_groups"][0], execution_plan["understanding"], request.query, repo)
+        logger.info(f"Workflow {workflow_id} started")
 
         return OrchestrateResponse(
             query="test"
