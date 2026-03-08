@@ -1,6 +1,9 @@
+import json
 import logging
+import redis
 import requests
 from celery import Task
+from core.config import settings
 
 from celery_app import celery_app
 from .code import process_file_group
@@ -10,9 +13,15 @@ from .state import (
     update_group_status,
     update_workflow_state
 )
+from .tool.create_pr import PullRequestGenerator
 
 SANDBOX_URL = "http://localhost:5001"
 logger = logging.getLogger(__name__)
+
+redis_client = redis.Redis.from_url(
+    settings.CELERY_BROKER_URL,
+    decode_responses=True
+)
 
 def _merge_all_files(state: dict) -> list:
     """Merge all generated files from all groups."""
@@ -24,6 +33,42 @@ def _merge_all_files(state: dict) -> list:
 
     logger.info("All files merged")
     return all_files
+
+def _dispatch_coder_groups(state: dict, workflow_id: str, ready_groups: list) -> None:
+    """Dispatch ready Coder groups to workers."""
+
+    execution_plan = state['execution_plan']
+    understanding = execution_plan['understanding']
+    
+    for group_id in ready_groups:
+        file_group = next( #Get the ready file group
+            (group for group in execution_plan['file_groups'] if group['group_id'] == group_id),
+            None
+        )
+    
+        if not file_group:
+            logging.info(f"Group {group_id} not found")
+            continue
+        
+        task = process_file_group.apply_async(
+            args=[
+                file_group,
+                understanding,
+                state["issue_description"],
+                state["repo_name"],
+                state["github_token"]
+            ],
+            link=mark_complete.s(workflow_id, group_id)
+        )
+
+        update_group_status(
+            workflow_id=workflow_id,
+            group_id=group_id,
+            status="running",
+            task_id=task.id
+        )
+
+        logger.info(f"Dispatched {group_id} (task: {task.id})")
 
 def _send_to_sandbox(workflow_id: str, all_files: list, state: dict) -> None:
     """Send merged files to sandbox for testing and update workflow status."""
@@ -70,52 +115,50 @@ def _send_to_sandbox(workflow_id: str, all_files: list, state: dict) -> None:
             status=final_status,
             sandbox_result=sandbox_result
         )
+
+        # Generates PR based on final sandbox result
+        if sandbox_result.get('success'):
+            _create_pull_request(workflow_id, all_files, state, sandbox_result)
+            logger.info("Creating GitHub PR")
+        else:
+            logger.info("Skipping PR creation - sandbox tests failed")
+            return
         
         logger.info(f"Workflow marked as {final_status}")
         
     except Exception as e:
-        print(f"Sandbox error: {e}")
+        logger.error(f"Sandbox error: {e}")
         update_workflow_state(
             workflow_id=workflow_id,
             status='failed',
             sandbox_result={'error': str(e)}
         )
 
-def _dispatch_coder_groups(state: dict, workflow_id: str, ready_groups: list) -> None:
-    """Dispatch ready Coder groups to workers."""
+def _create_pull_request(workflow_id: str, all_files: list, state: dict, sandbox_result: dict) -> None:
+    """Create GitHub PR with generated code if sandbox tests passed"""
 
-    execution_plan = state['execution_plan']
-    understanding = execution_plan['understanding']
-    
-    for group_id in ready_groups:
-        file_group = next(
-            (group for group in execution_plan['file_groups'] if group['group_id'] == group_id),
-            None
-        )
-    
-        if not file_group:
-            logging.info(f"Group {group_id} not found")
-            continue
-        
-        task = process_file_group.apply_async(
-            args=[
-                file_group,
-                understanding,
-                state["issue_description"],
-                state["repo_name"],
-                state["github_token"]
-            ],
-            link=mark_complete.s(workflow_id, group_id)
-        )
-
-        update_group_status(
+    try:
+        pr_creator = PullRequestGenerator(state["github_token"])
+        pr_result = pr_creator.create_pr(
+            repo_name=state["repo_name"],
+            files=all_files,
             workflow_id=workflow_id,
-            group_id=group_id,
-            status="running",
-            task_id=task.id
+            issue_description=state['issue_description'],
+            sandbox_result=sandbox_result
         )
 
-        logger.info(f"Dispatched {group_id} (task: {task.id})")
+        if pr_result.get("success"):
+            logger.info(f"PR created: {pr_result['pr_url']}")
+
+            state['pr_url'] = pr_result['pr_url']
+            state['pr_number'] = pr_result['pr_number']
+            redis_client.set(f"workflow:{workflow_id}", json.dumps(state))
+        else:
+            logger.error(f"PR creation failed: {pr_result.get('error')}")
+
+    except Exception as e:
+        logger.error(f"Exception during PR creation: {e}", exc_info=True)
+
 
 @celery_app.task(name="orchestrate", bind=True)
 def orchestrate_workflow(self: Task, workflow_id: str) -> None:
@@ -164,7 +207,7 @@ def orchestrate_workflow(self: Task, workflow_id: str) -> None:
     
     if any_failed:
         logger.warning(f"Groups failed - workflow failed")
-        update_workflow_state(workflow_id, status='failed', sandbox_result=None)
+        update_workflow_state(workflow_id, status='failed')
         return
     
     # ===== 4. Find ready file groups to dispatch =====

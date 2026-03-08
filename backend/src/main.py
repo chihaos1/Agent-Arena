@@ -1,11 +1,13 @@
 from core.logging import setup_logging
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.v1.repo import token, issue, embed
 from api.v1.agents import context, plan, orchestrate
 from core.config import settings
 
+load_dotenv()
 setup_logging()
 
 app = FastAPI(

@@ -246,10 +246,7 @@ def _generate_code(prompt: str) -> Tuple[List[Dict], str]:
     )
 
     # Extract content
-    tool_use = next(
-        (block for block in response.content if block.type == "tool_use"),
-        None
-    )
+    tool_use = next((block for block in response.content if block.type == "tool_use"), None)
 
     if not tool_use:
         return [], "" 

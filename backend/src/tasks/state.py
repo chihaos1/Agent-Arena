@@ -45,6 +45,8 @@ def create_workflow_state(
         "runtimes": sandbox_config.get("runtimes", []),
         "setup_commands": sandbox_config.get("setup_commands", []),
         "test_commands": sandbox_config.get("test_commands", []),
+        "pr_url": None,
+        "pr_number": None,
         "created_at": datetime.now(timezone.utc).timestamp(),
         "updated_at": datetime.now(timezone.utc).timestamp()
     }
@@ -70,7 +72,9 @@ def get_workflow_state(workflow_id: str) -> Optional[Dict]:
 def update_workflow_state(
     workflow_id: str,
     status: str,
-    sandbox_result: str
+    sandbox_result: str = None,
+    pr_url: str = None,
+    pr_number: int = None
 ) -> None:
     """Update the workflow's status"""
 
@@ -79,7 +83,15 @@ def update_workflow_state(
         return 
     
     state["status"] = status
-    state["sandbox_result"] = sandbox_result
+
+    if sandbox_result:
+        state["sandbox_result"] = sandbox_result 
+    if pr_url:
+        state['pr_url'] = pr_url
+    if pr_number:
+        state['pr_number'] = pr_number
+        
+    state['updated_at'] = datetime.now(timezone.utc).timestamp()
 
     key = f"workflow:{workflow_id}"
     redis_client.set(key, json.dumps(state))
