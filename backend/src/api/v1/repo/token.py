@@ -3,7 +3,7 @@ from github import GithubException
 
 from schemas.request.repo.token import ValidateTokenRequest
 from schemas.response.repo.token import ValidateTokenResponse
-from services.repo.token import get_github_repo_info
+from services.domain.repo.token import get_github_repo_info
 
 router = APIRouter(prefix="/repo", tags=["repo"])
 

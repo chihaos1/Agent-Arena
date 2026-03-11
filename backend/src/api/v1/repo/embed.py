@@ -3,7 +3,7 @@ from github import GithubException
 
 from schemas.request.repo.embed import EmbedRepoRequest
 from schemas.response.repo.embed import EmbedRepoResponse
-from services.repo.embed import VectorStore
+from services.domain.repo.embed import VectorStore
 
 from github import Github, Auth
 

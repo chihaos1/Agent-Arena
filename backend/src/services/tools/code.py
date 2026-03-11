@@ -7,7 +7,7 @@ Enables the ReAct agent to generate code for file groups from the execution plan
 
 import logging
 import traceback
-from typing import Annotated
+from typing import Annotated, Optional
 from datetime import datetime
 
 from github import Github, Auth
@@ -47,7 +47,9 @@ def create_coder_tool(github_token: str):
     def generate_code(
         execution_plan: Annotated[dict, Field(description="Execution plan from create_plan with file_groups and execution_order")],
         issue_description: Annotated[str, Field(description="Original GitHub issue description")],
-        repo_name: Annotated[str, Field(description="Repository name in format 'owner/repo' (e.g., 'facebook/react')")]
+        repo_name: Annotated[str, Field(description="Repository name in format 'owner/repo' (e.g., 'facebook/react')")],
+        generated_files: Annotated[Optional[list[dict]], Field(description="Previously generated files (for retry after test failure)")] = None,
+        test_results: Annotated[Optional[list[dict]], Field(description="Test results from run_sandbox (only provide when retrying after test failure)")] = None
     ) -> dict:
         """
         Generate code for all file groups in the execution plan.
@@ -57,8 +59,10 @@ def create_coder_tool(github_token: str):
         2. Generates complete file contents using CoderAgent
         3. Aggregates results across all groups
         
-        Note: Validation happens in the testing phase via sandbox execution.
-        This tool always returns generated files, even if they contain bugs.
+        If test_results is provided (from a previous run_sandbox failure):
+        - Extracts error messages from failed tests
+        - Uses correction prompt with error feedback
+        - Attempts to fix the specific issues identified
         
         Returns state update with:
         - generated_files: All generated files with complete contents
@@ -76,7 +80,7 @@ def create_coder_tool(github_token: str):
             with Github(auth=github_auth) as client:
                 repo = client.get_repo(repo_name)
 
-                # Normalize keys before passing to CoderAgent
+                # 1. Normalize keys before passing to CoderAgent
                 for group in execution_plan["file_groups"]:
                     
                     # Group-level field
@@ -93,9 +97,23 @@ def create_coder_tool(github_token: str):
                         })
                     
                     group["files"] = normalized_files
-                
-                # Iterate based on execution order
 
+                # 2. Extract errors from test results if this is a retry
+                test_errors = None
+                if test_results:
+                    logger.info("Retry attempt with test results")
+                    
+                    # Aggregate all errors from failed tests
+                    error_messages = []
+                    for test in test_results:
+                        if not test.get("passed") and test.get("error"):
+                            error_messages.append(
+                                f"Test '{test.get('test_name')}' failed:\n{test.get('error')}\n"
+                            )
+                    
+                    test_errors = "\n".join(error_messages) if error_messages else "Tests failed with no specific error messages"
+
+                # 3. Iterate based on execution order
                 all_files = []
                 group_results = []
 
@@ -111,12 +129,22 @@ def create_coder_tool(github_token: str):
 
                     logger.info(f"Processing group: {group_id}")
 
+                    # Build previous_attempt if retrying
+                    previous_attempt = None
+                    if test_errors:
+                        previous_attempt = {
+                            "files": generated_files,  
+                            "reasoning": execution_plan.get("understanding", ""),
+                            "test_feedback": test_errors 
+                        }
+
                     # Send group to generate code
                     result = coder.generate_code(
                         file_group=group,
                         understanding=execution_plan["understanding"],
                         issue=issue_description,
-                        repo=repo
+                        repo=repo,
+                        previous_attempt=previous_attempt
                     )
                     
                     # Add result to group results and generated files to all files
@@ -130,14 +158,6 @@ def create_coder_tool(github_token: str):
                     logger.info(f"Generated files for Group {group_id}: {len(result['files'])} files")
             
             logger.info(f"Code generation complete: {len(all_files)} files")
-
-            temp = {
-                "generated_files": all_files,
-                "group_results": group_results,
-                "current_step": "testing",
-                "updated_at": datetime.now()
-            }
-            logger.info(f"TEMP CODER RESULT: {temp} ")
 
             return {
                 "generated_files": all_files,

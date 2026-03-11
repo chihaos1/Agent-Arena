@@ -304,6 +304,9 @@ class AutoDevState(TypedDict):
     Format: {"context": "approved", "plan": "pending", "code": "pending"}
     """
 
+    tool_call_counts: dict[str, int]
+    """Track how many times each tool has been called"""
+
     retry_count: Annotated[int, update_counter]
     """Number of retry attempts for current step"""
     
@@ -586,6 +589,7 @@ def create_initial_state(
             "plan": "pending",
             "code": "pending"
         },
+        tool_call_counts={},
         retry_count=0,
         max_retries=max_retries,
         errors=[],

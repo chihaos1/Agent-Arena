@@ -3,7 +3,7 @@ from github import GithubException
 
 from schemas.request.agents.plan import ExecutionPlanRequest
 from schemas.response.agents.plan import ExecutionPlanResponse
-from services.agents.plan.agent import PlannerAgent
+from services.domain.plan.planner import PlannerAgent
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 

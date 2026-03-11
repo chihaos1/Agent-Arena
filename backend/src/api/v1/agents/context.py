@@ -3,7 +3,7 @@ from github import GithubException
 
 from schemas.request.agents.context import SearchContextRequest
 from schemas.response.agents.context import ContextAssemblerResponse
-from services.agents.context.agent import ContextAssembler
+from services.domain.context.assembler import ContextAgent
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -31,7 +31,7 @@ async def build_context(request: SearchContextRequest):
 
     try: 
         
-        assembler = ContextAssembler(
+        assembler = ContextAgent(
             github_token=request.github_token.get_secret_value()
         )
 

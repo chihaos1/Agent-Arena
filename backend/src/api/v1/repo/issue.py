@@ -3,7 +3,7 @@ from github import GithubException
 
 from schemas.request.repo.issue import CreateIssueRequest
 from schemas.response.repo.issue import CreateIssueResponse
-from services.repo.issue import create_github_issue
+from services.domain.repo.issue import create_github_issue
 
 router = APIRouter(prefix="/repo", tags=["repo"])
 

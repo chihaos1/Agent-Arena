@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import time
+import uuid
 from typing import Dict, List
 
 from docker.models.containers import Container
@@ -26,7 +27,6 @@ class ReviewerSandbox:
         self,
         generated_files: List[Dict[str, str]],
         commands: str,
-        workflow_id: str,
         repo_name: str,
         github_token: str
     ) -> Dict:
@@ -36,7 +36,6 @@ class ReviewerSandbox:
         Args:
             generated_files: List of generated files
             commands: Commands to run (e.g., ["npm install", "npm test"])
-            workflow_id: Workflow identifier
             repo_url: Git repo URL (e.g., "github.com/user/repo")
             github_token: GitHub personal access token
             runtime: Runtime environment ("node", "python", "go")
@@ -52,17 +51,18 @@ class ReviewerSandbox:
         """
 
         start_time = time.time()
+        run_id = str(uuid.uuid4())
         temp_dir = None
         container = None
 
         try:
             logger.info(f"Starting sandbox execution")
-            logger.info(f"\tWorkflow: {workflow_id}")
-            logger.info(f"\tFiles: {len(generated_files)}")
-            logger.info(f"\tRepository: {repo_name}")
+            logger.info(f"Run ID: {run_id}")
+            logger.info(f"Files: {len(generated_files)}")
+            logger.info(f"Repository: {repo_name}")
 
             # ===== 1. Create temporary directory =====
-            temp_dir = tempfile.mkdtemp(prefix=f"sandbox_{workflow_id}_")
+            temp_dir = tempfile.mkdtemp(prefix=f"sandbox_{run_id}_")
             logger.info(f"Created temp directory: {temp_dir}")
 
             # ===== 2. Write generated files to temp dir =====
@@ -76,7 +76,7 @@ class ReviewerSandbox:
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(file["content"])
                 
-                logger.debug(f"\tWrote: {file['path']}")
+                logger.debug(f"Wrote: {file['path']}")
             
             logger.info(f"Wrote {len(generated_files)} files to /generated folder")
 
@@ -89,10 +89,12 @@ class ReviewerSandbox:
             except docker.errors.ImageNotFound:
                 logger.error(f"Image {image_name} not found. Please build it first.")
                 return {
-                    "success": False,
-                    "logs": f"Universal image not found. Run: docker build -f Dockerfile.universal -t autodev-universal:latest .",
-                    "exit_code": 1,
-                    "duration_ms": int((time.time() - start_time) * 1000)
+                    "test_name": "sandbox_execution",
+                    "passed": True,
+                    # "passed": True,
+                    "output": "Universal image not found. Run: docker build -f Dockerfile.universal -t autodev-universal:latest .",
+                    "duration_seconds": int((time.time() - start_time) * 1000),
+                    "error": f"Image {image_name} not found. Please build it first."
                 }
 
             # ===== 4. Start container from universal image =====
@@ -111,37 +113,39 @@ class ReviewerSandbox:
                 mem_limit="2g"
             )
 
-            logger.info(f"\tContainer started: {container.short_id}")
+            logger.info(f"Container started: {container.short_id}")
 
             # ===== 5. Clone repository with GitHub token =====
             branch = "main"
             clone_url = f"https://{github_token}@github.com/{repo_name}.git"
 
-            logger.info(f"\tCloning {repo_name} (branch: {branch})...")
+            logger.info(f"Cloning {repo_name} (branch: {branch})...")
 
             clone_cmd = f"git clone --depth 1 --branch {branch} {clone_url} /app/repo"
             exit_code, output = container.exec_run(clone_cmd)
 
             if exit_code != 0:
                 logger.error(f"Git clone failed: {output.decode()}")
+                output_str = output.decode("utf-8", errors="ignore")
                 return {
-                    "success": False,
-                    "logs": f"Failed to clone repository:\n{output.decode()}",
-                    "exit_code": exit_code,
-                    "duration_ms": int((time.time() - start_time) * 1000)
+                    "test_name": "sandbox_execution",
+                    "passed": False,
+                    "output": f"Failed to clone repository",
+                    "duration_seconds": int((time.time() - start_time) * 1000),
+                    "error": None if success else self._extract_error(output_str)
                 }
             
-            logger.info(f"\tRepository cloned")
+            logger.info(f"Repository cloned")
 
             # ===== 6. Copy generated files into repo =====
-            logger.info("\tCopying generated files into repo...")
+            logger.info("Copying generated files into repo...")
 
             copy_cmd = "cp -rf /app/generated/* /app/repo/ 2>/dev/null || true"
             container.exec_run(copy_cmd)
 
             # ===== 7. Execute the chained command =====
             logger.info(f"Executing command chain...")
-            logger.info(f"\tCommand: {commands}")
+            logger.info(f"Command: {commands}")
 
             exit_code, output = container.exec_run(
                 f"/bin/bash -c '{commands}'",
@@ -151,7 +155,7 @@ class ReviewerSandbox:
             if exit_code != 0:
                 logger.error(f"Command execution failed: {output.decode()}")
 
-            output = output.decode("utf-8", errors="ignore")
+            output_str = output.decode("utf-8", errors="ignore")
 
             # ===== 9. Prepare result =====
             duration_ms = int((time.time() - start_time) * 1000)
@@ -163,48 +167,67 @@ class ReviewerSandbox:
             logger.info(f"Duration: {duration_ms}ms")
             
             return {
-                "success": success,
-                "logs": output,
-                "exit_code": exit_code,
-                "duration_ms": duration_ms,
-                "files_tested": len(generated_files)
+                "test_name": "sandbox_execution",
+                "passed": success,
+                "output": output_str,
+                "duration_seconds": duration_ms,
+                "error": None if success else self._extract_error(output_str)
             }
             
         except Exception as e:
             logger.error(f"Sandbox execution failed: {str(e)}", exc_info=True)
             duration_ms = int((time.time() - start_time) * 1000)
             
+            error_msg = f"Sandbox execution error: {str(e)}"
+
             return {
-                "success": False,
-                "logs": f"Sandbox execution error: {str(e)}",
-                "exit_code": 1,
-                "duration_ms": duration_ms,
-                "files_tested": len(generated_files) if generated_files else 0
+                "test_name": "sandbox_execution",
+                "passed": False,
+                "output": error_msg,
+                "duration_seconds": duration_ms,
+                "error": str(e)
             }
             
         finally:
             self._cleanup(temp_dir, container)
     
+    def _extract_error(self, output: str) -> str:
+        """Extract meaningful error from output"""
+        
+        lines = output.split("\n")
+        
+        # Find error lines
+        error_lines = []
+        for line in lines:
+            if any(keyword in line.lower() for keyword in ["error", "failed", "exception"]):
+                error_lines.append(line.strip())
+        
+        if error_lines:
+            return "\n".join(error_lines[:15])
+        
+        # Fallback
+        return "\n".join(lines[-20:])
+
     def _cleanup(self, temp_dir: str, container: Container) -> None:
         """Clean up temporary directory and Docker resources"""
 
         # Remove container
         if container:
             try:
-                logger.info(f"\tStopping container...")
+                logger.info(f"Stopping container...")
                 container.stop(timeout=5)
                 container.remove(force=True)
-                logger.info(f"\tContainer removed")
+                logger.info(f"Container removed")
             except Exception as e:
-                logger.warning(f"\t\tContainer cleanup failed: {e}")
+                logger.warning(f"Container cleanup failed: {e}")
 
         # Remove temp directory
         if temp_dir and os.path.exists(temp_dir):
             try:
-                logger.info(f"\tRemoving temp directory...")
+                logger.info(f"Removing temp directory...")
                 shutil.rmtree(temp_dir)
-                logger.info(f"\tTemp directory removed")
+                logger.info(f"Temp directory removed")
             except Exception as e:
-                logger.warning(f"\t\tTemp dir cleanup failed: {e}")
+                logger.warning(f"Temp dir cleanup failed: {e}")
         
         logger.info(f"Cleanup completed")

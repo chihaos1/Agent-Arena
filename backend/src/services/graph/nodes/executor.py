@@ -5,6 +5,7 @@ Executes tool calls decided by the agent.
 Separates decision-making (agent) from execution (this node).
 """
 
+import json
 import logging
 from datetime import datetime
 
@@ -15,15 +16,90 @@ from ..state import AutoDevState
 
 logger = logging.getLogger(__name__)
 
-def create_tool_summary(tool_name: str, result: dict) -> str:
+def create_tool_summary(state: AutoDevState, tool_name: str, result: dict) -> str:
     """Create agent-readable summary of tool execution results."""
 
     if tool_name == "retrieve_context":
         files = result.get("retrieved_files", [])
         file_list = "\n".join([f"- {file['file_path']}" for file in files])
         
-        return f"Retrieved {len(files)} files:\n{file_list}\n\nReady to create plan."
+        return f"""
+        
+        retrieve_context completed.
 
+        Retrieved {len(files)} files:
+        {file_list}
+
+        Ready for create an execution plan with create_plan."""
+    
+    elif tool_name == "create_plan":
+        plan = result.get("execution_plan", {})
+        groups = plan.get("file_groups", [])
+        files_to_modify = result.get("files_to_modify", [])
+
+        return f"""
+        
+        create_plan completed.
+
+        Created execution plan:
+        - {len(groups)} file groups
+        - {len(files_to_modify)} total files to modify
+
+        Ready to start coding with generate_code"""
+    
+    elif tool_name == "generate_code":
+        files = result.get("generated_files", [])
+        file_list = "\n".join([f"- {file['path']}" for file in files])
+        sandbox_config = state["execution_plan"]["sandbox_config"]
+        logger.info(f"sandbox_config being used: {state['execution_plan']['sandbox_config']}")
+        
+        return f"""
+        
+        generate_code completed.
+
+        Generated {len(files)} files:
+        {file_list}
+
+        Ready to test the code in sandbox with run_sandbox.
+        
+        Pass this sandbox_config to run_sandbox:
+        {json.dumps(sandbox_config, indent=2)}
+        
+        """
+    
+    elif tool_name == "run_sandbox":
+        test_results = result.get("test_results", {})
+        test_status = result.get("test_status", "unknown")
+        
+        passed = test_results.get("passed", False)
+        duration = test_results.get("duration_seconds", 0)
+        output = test_results.get("output", "")
+
+        output_preview = output[:500] if output else "No output"
+
+        return f"""
+        
+        run_sandbox completed. Tests {"PASSED" if passed else "FAILED"}
+
+        Duration: {duration:.1f}s
+        Status: {test_status}
+
+        Output preview:
+        {output_preview}
+
+        Ready to create pull request with create_pr"""
+
+    elif tool_name == "create_pr":
+        pr_url = result.get("pr_url", "")
+        pr_number = result.get("pr_number", 0)
+
+        return f"""
+        
+        create_pr completed
+
+        PR #{pr_number}: {pr_url}
+
+        Workflow complete"""
 
 def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
     """
@@ -56,8 +132,6 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
     if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
         logger.info("No tool calls in last message, skipping execution")
         return {}
-    
-    logger.info(f"Executing {len(last_message.tool_calls)} tool call(s)")
 
     # 3. Execute each tool call sequentially
     tool_messages = []
@@ -88,7 +162,7 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
                 state_updates.update(result)
 
                 # Create ToolMessage with summary (summary differs for each tool)
-                summary = create_tool_summary(tool_name, result)
+                summary = create_tool_summary(state, tool_name, result) or f"{tool_name} completed."
 
                 tool_message = ToolMessage(
                     content=summary,

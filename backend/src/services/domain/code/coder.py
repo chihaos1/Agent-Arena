@@ -13,7 +13,7 @@ class CoderAgent:
     """Generates code for a single file group"""
 
     def __init__(self):
-        self.client = Anthropic(api_key=settings.CLAUDE_API_KEY.get_secret_value())
+        self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
 
     def generate_code(self, file_group: dict, understanding: str, issue: str, repo: Repository, previous_attempt: dict = None) -> dict:
         """
@@ -156,37 +156,33 @@ class CoderAgent:
             else:
                 files_section += "\n(New file)\n"
         
-        return f"""Generate code for these files.
+        return f"""
+        
+            You are implementing a focused code change for a GitHub issue.
 
-        **Strategy:** {understanding}
-        **Task:** {file_group['description']}
-        **Issue:** {issue}
+            ## Task
+            Issue: {issue}
+            Goal: {file_group['description']}
+            Strategy: {understanding}
 
-        **Files:**
-        {files_section}
+            ## Files
+            {files_section}
 
-        **CRITICAL INSTRUCTIONS:**
+            ## Output requirements
+            - Complete files only — no snippets, no TODOs, no placeholders
+            - Match existing code style exactly (indentation, naming, patterns)
+            - Preserve all existing exports, props, and functions
+            - Only change what the task requires — nothing more
+            - Add imports for new dependencies, remove unused ones
+            - If files reference each other, keep types and interfaces consistent
 
-        1. **Completeness:** Return COMPLETE files, not snippets. Every file must be ready to save.
+            ## Runtime constraints
+            - Node.js 18 | Python 3.12 | Go 1.21
+            - No Node 20+ APIs | No vite@7+ | No Python 3.13+ features
+            - New npm packages must declare Node 18 support in their engines field
 
-        2. **Code Quality:**
-        - Match existing style (indentation, naming, patterns)
-        - Add all necessary imports
-        - Remove unused imports
-        - Add comments for complex logic
-
-        3. **Preserve Existing Functionality:**
-        - Don't break existing features
-        - Keep all existing props, functions, exports
-        - Only change what's specified in "Changes needed"
-
-        4. **Consistency Across Files:**
-        - If files reference each other, ensure they match
-        - Use consistent types/interfaces
-        - Verify imports are correct
-
-        **OUTPUT:**
-        Use generate_code tool to return all {len(file_group['files'])} files with complete content.
+            Use generate_code to return all {len(file_group['files'])} files.
+            
         """
 
     def _build_code_correction_prompt(self, file_group: dict, understanding: str, previous_attempt: dict) -> str:

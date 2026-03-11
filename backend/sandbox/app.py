@@ -43,7 +43,6 @@ def execute():
         # Initialize variables
         files = data['files']
         commands = data.get('commands', ['npm install', 'npm run build', 'npm test'])
-        workflow_id = data.get('workflow_id', 'unknown')
         repo_name = data.get('repo_name')
         github_token = data.get('github_token')
 
@@ -58,20 +57,18 @@ def execute():
 
         # Log request
         logger.info(f"Execution request received")
-        logger.info(f"\tWorkflow: {workflow_id}")
-        logger.info(f"\tFiles: {len(files)}")
-        logger.info(f"\tCommands: {commands}")
-
+        logger.info(f"Files: {len(files)}")
+        logger.info(f"Commands: {commands}")
+ 
         # Execute in sandbox
         result = sandbox.execute(
             generated_files=files,
             commands=commands,
-            workflow_id=workflow_id,
             repo_name=repo_name,
             github_token=github_token
         )
 
-        logger.info(f"Execution completed: success={result['success']}")
+        logger.info(f"Execution completed: success={result['passed']}")
         
         # Return actual result from sandbox
         return jsonify(result), 200

@@ -12,7 +12,7 @@ class PlannerAgent:
     """Creates execution plan with file grouping and retry logic"""
 
     def __init__(self):
-        self.client = Anthropic(api_key=settings.CLAUDE_API_KEY.get_secret_value())
+        self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
 
     def create_plan(self, context: ContextAssemblerResponse) -> dict:
         """
@@ -115,91 +115,72 @@ class PlannerAgent:
             3. **Group dependencies**: Files that import each other → same group. Independent → separate groups.
             4. **Order by dependencies**: Base files before dependents.
 
-            **Important:** Manifests (package.json, requirements.txt) are for Job 2 (sandbox config), NOT for Job 1 (file changes).
-            Do NOT include manifest files in your file_groups unless the issue specifically asks to modify them.
+            **File Schema — use exactly these field names:**
+            Each file in file_groups MUST use this exact structure:
+            {{"file_path": "path/to/file.tsx", "action": "create|modify|delete", "changes": "what to change"}}
+
+            - Use `file_path` not `path`, `filepath`, or `filename`
+            - Use `changes` not `description`, `change`, or `summary`
 
             **Guidelines:**
-            - `can_parallelize: false` → tightly coupled files
-            - `can_parallelize: true` → independent changes
             - Be specific in `changes` field
-            - If unsure if file is needed, exclude it (can add later)
+            - If unsure if file is needed, exclude it
 
             **Example:**
 
             Issue: "Add export to PDF feature"
-            Files from search: [ReportViewer.js, PDFService.js, analytics.js, config.json]
 
-            Good plan (focused):
-             ```
+            Good plan:
+            ```
             file_groups: [
             {{
                 group_id: "pdf-export",
                 files: [
-                {{path: "utils/PDFGenerator.js", action: "create", changes: "PDF generation utility using jsPDF"}},
-                {{path: "ReportViewer.js", action: "modify", changes: "Add Export button calling PDFGenerator"}}
-                ],
-                can_parallelize: false
+                    {{"file_path": "utils/PDFGenerator.js", "action": "create", "changes": "PDF generation utility using jsPDF"}},
+                    {{"file_path": "ReportViewer.js", "action": "modify", "changes": "Add Export button calling PDFGenerator"}}
+                ]
             }}
             ]
             ```
-            Excluded: PDFService.js (backend persistence not needed yet), analytics.js (unrelated), config.json (no changes)
 
-            Bad plan (overengineered):
+            Bad plan:
             ```
             file_groups: [
-            {{files: [PDFGenerator.js, ReportViewer.js, PDFService.js, analytics.js, logger.js, config.json]}}
+            {{"files": ["PDFGenerator.js", "ReportViewer.js"]}}
             ]
             ```
-            Why bad: Adds analytics tracking, backend persistence, logging before user even tries the feature
+            Why bad: Files listed as strings not objects, missing required fields.
 
             ---
 
             ## JOB 2: SANDBOX CONFIGURATION (Testing Environment)
 
-            **Runtime Detection from Manifests:**
-            
-            - `package.json` found → Runtime: "node"
-            - Look for lockfile signals: `yarn.lock` → Use `yarn install` and `yarn build`
-            - Look for lockfile signals: `pnpm-lock.yaml` → Use `pnpm install` and `pnpm build`
-            - No lockfile → Use `npm install` and `npm run build`
-            - Check `"scripts"` section for actual test command
-            
-            - `requirements.txt` OR `pyproject.toml` → Runtime: "python"
-            - If `pyproject.toml` contains `[tool.poetry]` → Use `poetry install` and `poetry run pytest`
-            - Otherwise → Use `pip install -e .` and `pytest`
-            
-            - `go.mod` → Runtime: "go"
-            - Setup: `go mod download`
-            - Tests: `go test ./...`
-            
-            - Multiple manifests → Multiple runtimes (polyglot project)
+            ** MONOREPO RULE — READ BEFORE WRITING ANY COMMANDS:**
 
-            **Smart Command Pruning (Critical for Efficiency):**
-            
-            Look at the file extensions in your execution plan to determine which test suites to run:
-            - If ONLY `.ts`/`.tsx`/`.js`/`.jsx` files modified → Only run Node.js build
-            - If ONLY `.py` files modified → Only run Python tests
-            - If ONLY `.go` files modified → Only run Go tests
-            - If files from multiple languages modified → Run all relevant test suites
+            If any manifest path contains a subdirectory (e.g. `frontend/package.json`, not `package.json`),
+            every single command MUST be prefixed with `cd <subdir> &&` as one string.
 
-            **Test Command Guidelines:**
-            - For Node.js projects: Use `npm run build` to validate TypeScript compilation
-            - For Python projects: Use `pytest` to run tests
-            - For Go projects: Use `go test ./...`
-            - Build catches: TypeScript errors, import issues, syntax problems
-            - Tests catch: Logic errors, edge cases, integration issues
+            ✓ CORRECT: `cd frontend && npm install`
+            ✗ WRONG: `npm install`
 
-            **Manifest Interpretation:**
-            - If a manifest is listed but its content is not shown, assume it contains standard dependencies.
-            - Do NOT guess specific version numbers unless they are visible in the provided snippets.
-            - Focus on lockfile signals (yarn.lock, pnpm-lock.yaml) to choose the correct package manager.
+            This applies to ALL setup_commands and test_commands — no exceptions. 
 
-            **Monorepo Handling:**
-            - If manifests exist in subdirectories (e.g., `frontend/package.json`, `backend/pyproject.toml`), detect the monorepo structure.
-            - Commands should run from the appropriate subdirectory or use monorepo tools if detected.
+            **Runtime Detection:**
+            - `package.json` → node | `requirements.txt` / `pyproject.toml` → python | `go.mod` → go
+            - Multiple manifests → multiple runtimes
+            - Lockfile signals: `yarn.lock` → yarn | `pnpm-lock.yaml` → pnpm | none → npm
+
+            **Runtime Constraints:**
+            - Node.js 18 | Python 3.12 | Go 1.21 — do not require newer versions
+
+            **Commands:**
+            - Node.js: `npm run build` ONLY — no `npm test` or `npm run test`
+            - Python: `pytest`
+            - Go: `go test ./...`
+            - Only run commands for languages present in your file_groups
 
             ---
-
+            
             Use create_execution_plan tool. Focus on:
             - Job 1: Minimal files that solve the immediate issue
             - Job 2: Correct sandbox runtimes and commands based on manifests and modified file types

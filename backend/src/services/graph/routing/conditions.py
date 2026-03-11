@@ -42,11 +42,6 @@ def should_continue(state: AutoDevState) -> Literal["execute_tools", "approval",
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         gate = GATE_MAP.get(state["current_step"])
-        
-        # TEMPORARY GATE
-        if state["current_step"] == "testing":
-            logger.info("Planning complete - ending workflow (no testing tool yet)")
-            return "end"
 
         if gate and state["approval_gates"].get(gate) == "pending":
             logger.info(f"Approval required for '{gate}' gate")

@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     API_VERSION: str = "v1"
 
     # Claude Settings
-    CLAUDE_API_KEY: SecretStr
+    ANTHROPIC_API_KEY: SecretStr
     CLAUDE_MODEL: str
     CLAUDE_MAX_TOKENS: int 
 
@@ -48,5 +48,8 @@ class Settings(BaseSettings):
     # Celery Settings
     CELERY_BROKER_URL: str
     CELERY_RESULT_BACKEND: str
+
+    # Sandbox Settings
+    SANDBOX_URL: str
 
 settings: Settings = Settings()

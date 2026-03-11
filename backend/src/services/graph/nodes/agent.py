@@ -28,76 +28,47 @@ def build_system_prompt(state: AutoDevState) -> SystemMessage:
     - That it has full autonomy to decide the order
     """
 
+    # Dynamic guide for tool responsibilities
+    step_to_tool = {
+        "retrieving_context": ("retrieve_context", "fetch relevant files from the repo (call once)"),
+        "planning":           ("create_plan",       "structure the implementation from retrieved context"),
+        "coding":             ("generate_code",     "write the actual code changes"),
+        "testing":            ("run_sandbox",       "validate the code with tests"),
+        "reviewing":          ("review_code",       "quality gate before submitting"),
+        "creating_pr":        ("create_pr",         "open the pull request — only when everything looks good"),
+    }
+
+    current_tool, _ = step_to_tool.get(
+        state["current_step"], ("unknown", "unknown step — stop and report")
+    )
+
+    tool_responsibilities = "\n".join([
+        f"  - {tool}: {desc} {'← YOU ARE HERE' if tool == current_tool else ''}"
+        for _ , (tool, desc) in step_to_tool.items()
+    ])
+
     # Build context for current progress
-    progress_context = []
-
-    if state["retrieved_files"]:
-        progress_context.append(
-            f"Context retrieved: {len(state['retrieved_files'])} files"
-        )
-
-    if state["execution_plan"]:
-        progress_context.append(
-            f"Plan created: {len(state['execution_plan']['file_groups'])} file groups"
-        )
-    
-    if state["generated_code"]:
-        progress_context.append(
-            f"Code generated: {len(state['generated_code'])} files"
-        )
-    
-    if state["test_status"] != "pending":
-        progress_context.append(
-            f"Tests run: {state['test_status']}"
-        )
-
-    progress = "\n".join(progress_context) if progress_context else "No steps completed yet"
-
     prompt = f"""
-    
+
         You are AutoDev, an autonomous coding agent that transforms GitHub issues into production-ready pull requests.
 
-        **Current Task:**
+        ## Task
         Issue #{state['issue_id']}: {state['issue_description']}
-        Repository: {state['repo_name']}
-        Branch: {state['branch_name']}
+        Repository: {state['repo_name']} | Branch: {state['branch_name']}
+        Current step: {state['current_step']}
 
-        **Progress So Far:**
-        {progress}
+        ## Tool responsibilities
+        {tool_responsibilities}
 
-        **Current Step:** {state['current_step']}
+        ## Tool data integrity
+        Pass tool outputs to the next tool exactly as received. Do not rename or restructure fields.
 
-        **Available Tools:**
-        - **retrieve_context**: Search codebase for relevant files
-        - **create_plan**: Generate execution plan with file groups
-        - **generate_code**: Implement changes based on plan
-        - **run_sandbox**: Execute tests in isolated environment
-        - **review_code**: AI review of generated code
-        - **create_pr**: Submit pull request to GitHub
-
-        **Workflow (Follow Strictly):**
-        1. retrieve_context → Get relevant files (ONE comprehensive query)
-        2. create_plan → Generate execution plan from context
-        3. generate_code → Implement the planned changes
-        4. run_sandbox → Test the generated code
-        5. review_code → Quality check (if tests pass)
-        6. create_pr → Submit the pull request
-
-        **Rules:**
-        - Call retrieve_context ONCE with a comprehensive query
-        - After retrieve_context completes, you MUST call create_plan next
-        - After create_plan completes, you MUST call generate_code next
-        - NEVER call retrieve_context after create_plan (generate_code fetches files from GitHub)
-        - NEVER call the same tool twice in a row
-        - If a ToolMessage says "Ready to X", your next action MUST be X
-        - Follow ToolMessage guidance strictly
-
-        **CRITICAL: Tool Data Integrity**
-        Pass tool outputs EXACTLY as received from previous tools.
-        DO NOT rename fields (e.g., "group_id" → "name", "file_path" → "path").
-        Treat tool outputs as opaque - pass them through unchanged.
+        ## If something goes wrong
+        If a tool fails, assess whether a single retry with different inputs makes sense.
+        If you still can't proceed after one retry, stop and report what went wrong.
+        Retrying the same tool repeatedly will not produce different results.
         
-    """
+        """
     
     return SystemMessage(content=prompt)
     
@@ -134,9 +105,9 @@ def agent(state: AutoDevState, tools: list[BaseTool]) -> dict:
     tool_schemas = [convert_to_openai_tool(tool) for tool in tools]
 
     try:
-
         # 4. Call LLM via LiteLLM 
         logger.debug(f"Calling LLM with model: {state['llm_model']}")
+
         response = completion(
             model=state["llm_model"],
             messages=messages,
@@ -180,7 +151,7 @@ def agent(state: AutoDevState, tools: list[BaseTool]) -> dict:
 
         # 9. Create LangGraph-compatible AIMessage
         ai_message = AIMessage(
-            content=assistant_message.content or "",
+            content="", #assistant_message.content or 
             tool_calls=langchain_tool_calls
         )
 

@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from github import Github, Auth
 from github.Repository import Repository
 
-from services.repo.embed import VectorStore
+from services.domain.repo.embed import VectorStore
 from .tools.parse import CodeParser
 
 logger = logging.getLogger(__name__)

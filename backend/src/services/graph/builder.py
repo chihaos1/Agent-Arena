@@ -16,9 +16,7 @@ from .state import AutoDevState
 from .nodes.agent import agent
 from .nodes.executor import tool_executor
 from .routing import should_continue, after_execution, after_approval
-from ..tools.context import create_context_tool
-from ..tools.plan import create_plan_tool
-from ..tools.code import create_coder_tool
+from ..tools import create_tools
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +31,7 @@ def build_graph(github_token: str, enable_checkpointing: bool = True):
     logger.info("Building AutoDev graph...")
 
     # Create tools
-    tools = {
-        "retrieve_context": create_context_tool(github_token),
-        "create_plan": create_plan_tool(),
-        "generate_code": create_coder_tool(github_token)
-    }
-
+    tools = create_tools(github_token)
     logger.info(f"Initialized {len(tools)} tools: {list(tools.keys())}")
 
     # Build graph
