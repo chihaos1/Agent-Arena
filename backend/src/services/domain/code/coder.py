@@ -1,8 +1,9 @@
 import copy
+import json
 import logging
 from typing import Tuple, List, Dict
 
-from anthropic import Anthropic
+from litellm import completion
 from github.Repository import Repository
 
 from core.config import settings
@@ -12,10 +13,11 @@ logger = logging.getLogger(__name__)
 class CoderAgent:
     """Generates code for a single file group"""
 
-    def __init__(self):
-        self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
+    def __init__(self, model: str = None, temperature: float = 0.0):
+        self.model = model or "claude-sonnet-4-20250514"
+        self.temperature = temperature
 
-    def generate_code(self, file_group: dict, understanding: str, issue: str, repo: Repository, previous_attempt: dict = None) -> dict:
+    def generate_code(self, file_group: dict, understanding: str, issue: str, repo: Repository) -> dict:
         """
         Generate code for ONE file group.
         
@@ -24,10 +26,6 @@ class CoderAgent:
             understanding: Overall understanding from plan
             issue: Original issue description
             repo: GitHub repo object
-            previous_attempt: Optional dict when code failed testing:
-                - files: Previously generated files
-                - reasoning: Previous reasoning
-                - test_feedback: Test/compilation errors
         
         Returns:
             {
@@ -41,14 +39,8 @@ class CoderAgent:
         # Fetch files from Github
         file_group = self._fetch_files(file_group, repo)
 
-        # Build prompts for either initial or correction code generation
-        if previous_attempt:
-            logger.info("Building correction prompt with test feedback")
-            prompt = self._build_code_correction_prompt(file_group, understanding, issue, previous_attempt
-            )
-        else:
-            logger.info("Building initial generation prompt")
-            prompt = self._build_code_generation_prompt(file_group, understanding, issue)
+        # Build prompts
+        prompt = self._build_code_generation_prompt(file_group, understanding, issue)
 
         # Generate code and reasoning
         files, reasoning = self._generate_code(prompt)
@@ -80,26 +72,30 @@ class CoderAgent:
     def _generate_code(self, prompt: str) -> Tuple[List[Dict], str]:
         """Generate the code based on instruction from the Planner"""
 
-        logger.info("Calling Claude for code generation")
+        logger.info(f"Calling LLM for code generation: model={self.model}, temp={self.temperature}")
 
-        response = self.client.messages.create(
-            model=settings.CLAUDE_MODEL,
-            max_tokens=8000,
-            temperature=0,
+        response = completion(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
             tools=[self._get_tool_schema()],
-            tool_choice={"type": "tool", "name": "generate_code"},
-            messages=[{"role": "user", "content": prompt}]
+            tool_choice={"type": "function", "function": {"name": "generate_code"}},
+            temperature=self.temperature,
+            max_tokens=8000
         )
 
-        # Extract tool_use block
-        tool_use = next((block for block in response.content if block.type == "tool_use"), None)
-
-        if not tool_use:
-            logger.error("No tool use found in response")
-            return [], "" 
+        # Extract tool call from response
+        assistant_message = response.choices[0].message
         
-        files = tool_use.input.get("files", [])
-        reasoning = tool_use.input.get("reasoning", "")
+        if not hasattr(assistant_message, "tool_calls") or not assistant_message.tool_calls:
+            logger.error("No tool calls found in response")
+            return [], ""
+        
+        tool_call = assistant_message.tool_calls[0]
+        
+        # Parse tool_call
+        args = json.loads(tool_call.function.arguments)
+        files = args.get("files", [])
+        reasoning = args.get("reasoning", "")
 
         logger.info(f"Generated {len(files)} files")
         
@@ -109,35 +105,38 @@ class CoderAgent:
         """Tool schema for generating code"""
 
         return {
-            "name": "generate_code",
-            "description": "Generated code files with complete contents based on user intent",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "reasoning": {
-                        "type": "string",
-                        "description": "Your analysis of how these files work together, what dependencies exist, and what imports are needed. This helps ensure consistency."
-                    },
-                    "files": {
-                        "type": "array",
-                        "description": "Array of generated files with complete contents",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "path": {
-                                    "type": "string",
-                                    "description": "The exact file path"
+            "type": "function",
+            "function": {
+                "name": "generate_code",
+                "description": "Generated code files with complete contents based on user intent",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "reasoning": {
+                            "type": "string",
+                            "description": "Your analysis of how these files work together, what dependencies exist, and what imports are needed. This helps ensure consistency."
+                        },
+                        "files": {
+                            "type": "array",
+                            "description": "Array of generated files with complete contents",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "The exact file path"
+                                    },
+                                    "content": {
+                                        "type": "string",
+                                        "description": "The complete file content"
+                                    }
                                 },
-                                "content": {
-                                    "type": "string",
-                                    "description": "The complete file content"
-                                }
-                            },
-                            "required": ["path", "content"]
+                                "required": ["path", "content"]
+                            }
                         }
-                    }
-                },
-                "required": ["reasoning", "files"]
+                    },
+                    "required": ["reasoning", "files"]
+                }
             }
         }
 
@@ -162,7 +161,7 @@ class CoderAgent:
 
             ## Task
             Issue: {issue}
-            Goal: {file_group['description']}
+            Goal: {file_group.get('description')}
             Strategy: {understanding}
 
             ## Files
@@ -183,51 +182,4 @@ class CoderAgent:
 
             Use generate_code to return all {len(file_group['files'])} files.
             
-        """
-
-    def _build_code_correction_prompt(self, file_group: dict, understanding: str, previous_attempt: dict) -> str:
-        """Build correction prompt with test feedback when previous code failed the testing"""
-        
-        # Unpack previous attempt
-        previous_files = previous_attempt["files"]
-        previous_reasoning = previous_attempt["reasoning"]
-        test_feedback = previous_attempt["test_feedback"]
-        
-        # Show the files that were generated
-        files_section = ""
-        for file in previous_files:
-            files_section += f"\n{'='*60}\n"
-            files_section += f"File: {file['path']}\n"
-            files_section += f"```\n{file['content']}\n```\n"
-        
-        return f"""Fix the code based on test/compilation errors.
-
-        **Original Goal:**
-        {understanding}
-
-        **This Group's Task:**
-        {file_group['description']}
-
-        **Your Previous Reasoning:**
-        {previous_reasoning}
-
-        **Your Previous Files:**
-        {files_section}
-
-        **Test/Compilation Errors:**
-        ```
-        {test_feedback}
-        ```
-
-        **Instructions:**
-        1. Read the errors carefully - they show line numbers and specific issues
-        2. Fix ONLY the errors shown (don't rewrite unrelated code)
-        3. Common fixes:
-            - Import errors → Add missing imports
-            - Type errors → Fix type annotations or prop definitions
-            - Syntax errors → Check brackets, quotes, semicolons
-        4. Return COMPLETE files (not just the fixed parts)
-        5. Maintain all existing functionality
-
-        Use generate_code tool to return corrected files.
         """

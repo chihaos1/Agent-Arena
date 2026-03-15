@@ -16,7 +16,7 @@ from services.graph.state import AutoDevError
 
 logger = logging.getLogger(__name__)
 
-def create_pr_tool(github_token: str):
+def create_pr_tool(github_token: str, strategy_name: str):
     """
     Factory function to create the PR creation tool with GitHub credentials.
     
@@ -29,11 +29,10 @@ def create_pr_tool(github_token: str):
 
     @tool
     def create_pr(
-        issue_id: Annotated[int, Field(description="GitHub issue number being addressed")],
+        issue_id: Annotated[str, Field(description="GitHub issue number being addressed")],
         repo_name: Annotated[str, Field(description="Repository name in format 'owner/repo' (e.g., 'facebook/react')")],
         generated_files: Annotated[list[dict], Field(description="Generated files from generate_code with 'path' and 'content' fields")],
         issue_description: Annotated[str, Field(description="Original GitHub issue description")],
-        test_results: Annotated[dict, Field(description="Sandbox test results from run_sandbox")],
     ) -> dict:
         """
         Create a GitHub pull request with generated code changes.
@@ -46,7 +45,6 @@ def create_pr_tool(github_token: str):
             repo_name: Repository in owner/repo format
             generated_files: List of files with 'path' and 'content'
             issue_description: Original issue text
-            test_results: Results from sandbox execution
         
         Returns:
             {
@@ -67,7 +65,7 @@ def create_pr_tool(github_token: str):
                 repo_name=repo_name,
                 files=generated_files,
                 issue_description=issue_description,
-                sandbox_result=test_results
+                strategy_name=strategy_name
             )
 
             logger.info(f"PR created successfully: {result['pr_url']}")

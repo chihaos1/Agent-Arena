@@ -19,7 +19,61 @@ from services.graph.state import AutoDevError
 
 logger = logging.getLogger(__name__)
 
-def create_coder_tool(github_token: str):
+def normalize_execution_plan(execution_plan: dict, strategy_name: str) -> dict:
+    """
+    Normalize execution plan to handle variations from different LLMs.
+    
+    Handles:
+    - Different field names (group_name vs group_id, path vs file_path)
+    - Files as strings vs objects
+    - execution_order as indices vs group_ids
+    """
+    
+    # Normalize file groups
+    for idx, group in enumerate(execution_plan.get("file_groups", [])):
+        
+        # Ensure group has group_id
+        if "group_id" not in group:
+            group["group_id"] = (
+                group.get("group_name") or 
+                group.get("name") or 
+                f"group_{idx}"
+            )
+            logger.warning(f"{strategy_name}: Added missing group_id - {group['group_id']}")
+        
+        # Normalize files
+        normalized_files = []
+        for file in group.get("files", []):
+            if isinstance(file, str): #Files as strings vs objects
+                normalized_files.append({
+                    "file_path": file,
+                    "action": "modify",
+                    "changes": ""
+                })
+            else:
+                normalized_files.append({ #Fix any wrong field name
+                    "file_path": file.get("file_path") or file.get("path") or file.get("filepath", ""),
+                    "action": file.get("action") or file.get("change_type") or file.get("modification_type", "modify"),
+                    "changes": file.get("changes") or file.get("description") or file.get("modifications", ""),
+                })
+        
+        group["files"] = normalized_files
+    
+    # Normalize execution_order
+    execution_order = execution_plan.get("execution_order", [])
+    
+    if execution_order and isinstance(execution_order[0], int):
+        logger.warning(f"{strategy_name}: execution_order contains indices, mapping to group_ids")
+        execution_order = [
+            execution_plan["file_groups"][idx].get("group_id", f"group_{idx}")
+            for idx in execution_order
+            if idx < len(execution_plan["file_groups"])
+        ]
+        execution_plan["execution_order"] = execution_order
+    
+    return execution_plan
+
+def create_coder_tool(github_token: str, strategy_name: str, model: str, temperature: float):
     """
     Creates a code generation tool using CoderAgent.
     
@@ -41,15 +95,13 @@ def create_coder_tool(github_token: str):
         ... )
     """
     
-    coder = CoderAgent()
+    coder = CoderAgent(model=model, temperature=temperature)
 
     @tool
     def generate_code(
         execution_plan: Annotated[dict, Field(description="Execution plan from create_plan with file_groups and execution_order")],
         issue_description: Annotated[str, Field(description="Original GitHub issue description")],
         repo_name: Annotated[str, Field(description="Repository name in format 'owner/repo' (e.g., 'facebook/react')")],
-        generated_files: Annotated[Optional[list[dict]], Field(description="Previously generated files (for retry after test failure)")] = None,
-        test_results: Annotated[Optional[list[dict]], Field(description="Test results from run_sandbox (only provide when retrying after test failure)")] = None
     ) -> dict:
         """
         Generate code for all file groups in the execution plan.
@@ -59,59 +111,24 @@ def create_coder_tool(github_token: str):
         2. Generates complete file contents using CoderAgent
         3. Aggregates results across all groups
         
-        If test_results is provided (from a previous run_sandbox failure):
-        - Extracts error messages from failed tests
-        - Uses correction prompt with error feedback
-        - Attempts to fix the specific issues identified
-        
         Returns state update with:
         - generated_files: All generated files with complete contents
         - group_results: Summary of each group's generation
-        - current_step: Set to "testing" for next phase
+        - current_step: Set to "creating_pr" for next phase
 
         Do NOT rename or restructure fields
         """
 
-        logger.info(f"Generating code for {len(execution_plan['file_groups'])} groups")
+        logger.info(f"{strategy_name}: Generating code for {len(execution_plan['file_groups'])} groups")
 
         try:
             github_auth = Auth.Token(github_token)
 
             with Github(auth=github_auth) as client:
                 repo = client.get_repo(repo_name)
-
-                # 1. Normalize keys before passing to CoderAgent
-                for group in execution_plan["file_groups"]:
-                    
-                    # Group-level field
-                    if "name" in group and "group_id" not in group:
-                        group["group_id"] = group["name"]
-                    
-                    # File-level fields
-                    normalized_files = []
-                    for file in group.get("files", []):
-                        normalized_files.append({
-                            "file_path": file.get("file_path") or file.get("path") or file.get("filepath", ""),
-                            "action": file.get("action") or file.get("change_type") or file.get("modification_type", "modify"),
-                            "changes": file.get("changes") or file.get("description") or file.get("modifications", ""),
-                        })
-                    
-                    group["files"] = normalized_files
-
-                # 2. Extract errors from test results if this is a retry
-                test_errors = None
-                if test_results:
-                    logger.info("Retry attempt with test results")
-                    
-                    # Aggregate all errors from failed tests
-                    error_messages = []
-                    for test in test_results:
-                        if not test.get("passed") and test.get("error"):
-                            error_messages.append(
-                                f"Test '{test.get('test_name')}' failed:\n{test.get('error')}\n"
-                            )
-                    
-                    test_errors = "\n".join(error_messages) if error_messages else "Tests failed with no specific error messages"
+                
+                # 1. Normalize the execution plan
+                execution_plan = normalize_execution_plan(execution_plan, strategy_name)
 
                 # 3. Iterate based on execution order
                 all_files = []
@@ -124,27 +141,17 @@ def create_coder_tool(github_token: str):
                     )
 
                     if not group:
-                        logger.error(f"Group {group_id} not found")
+                        logger.error(f"{strategy_name}: Group {group_id} not found")
                         continue
 
-                    logger.info(f"Processing group: {group_id}")
-
-                    # Build previous_attempt if retrying
-                    previous_attempt = None
-                    if test_errors:
-                        previous_attempt = {
-                            "files": generated_files,  
-                            "reasoning": execution_plan.get("understanding", ""),
-                            "test_feedback": test_errors 
-                        }
+                    logger.info(f"{strategy_name}: Processing group - {group_id}")
 
                     # Send group to generate code
                     result = coder.generate_code(
                         file_group=group,
-                        understanding=execution_plan["understanding"],
+                        understanding=execution_plan.get("understanding", ""),
                         issue=issue_description,
                         repo=repo,
-                        previous_attempt=previous_attempt
                     )
                     
                     # Add result to group results and generated files to all files
@@ -155,19 +162,19 @@ def create_coder_tool(github_token: str):
                     })
 
                     all_files.extend(result["files"])
-                    logger.info(f"Generated files for Group {group_id}: {len(result['files'])} files")
+                    logger.info(f"{strategy_name}: Generated files for Group {group_id}: {len(result['files'])} files")
             
-            logger.info(f"Code generation complete: {len(all_files)} files")
+            logger.info(f"{strategy_name}: Code generation complete with {len(all_files)} files")
 
             return {
                 "generated_files": all_files,
                 "group_results": group_results,
-                "current_step": "testing",
+                "current_step": "creating_pr",
                 "updated_at": datetime.now()
             }
 
         except Exception as e:
-            logger.error(f"Code generation failed: {e}", exc_info=True)
+            logger.error(f"{strategy_name}:Code generation failed: {e}", exc_info=True)
             
             return {
                 "errors": [AutoDevError(

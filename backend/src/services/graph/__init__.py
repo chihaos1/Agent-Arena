@@ -11,7 +11,6 @@ from .state import (
     
     # Sub-objects
     AutoDevError,
-    TestResult,
     
     # Factory
     create_initial_state,
@@ -30,7 +29,6 @@ __all__ = [
     # State
     "AutoDevState",
     "AutoDevError",
-    "TestResult",
     
     # Factory
     "create_initial_state",

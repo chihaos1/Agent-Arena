@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.v1.repo import token, issue, embed
 from api.v1.agents import context, plan, orchestrate
+from api.v1.arena import arena
 from core.config import settings
 
 load_dotenv()
@@ -33,6 +34,9 @@ app.include_router(embed.router)
 app.include_router(context.router)
 app.include_router(plan.router)
 app.include_router(orchestrate.router)
+
+# Arena Route
+app.include_router(arena.router)
 
 @app.get("/")
 async def root():

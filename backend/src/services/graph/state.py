@@ -87,35 +87,6 @@ class AutoDevError:
             "traceback": self.traceback
         }
     
-@dataclass
-class TestResult:
-    """
-    Individual test execution result from sandbox.
-    
-    Attributes:
-        test_name: Name/identifier of the test (e.g., "test_user_login")
-        passed: Whether the test succeeded
-        output: Test output/logs
-        duration_seconds: How long the test took to run
-        error: Error message if test failed (optional)
-    """
-
-    test_name: str
-    passed: bool
-    output: str
-    duration_seconds: float
-    error: Optional[str] = None
-
-    def to_dict(self) -> dict:
-        """Convert to dict for JSON serialization"""
-        return {
-            "test_name": self.test_name,
-            "passed": self.passed,
-            "output": self.output,
-            "duration_seconds": self.duration_seconds,
-            "error": self.error
-        }
-    
 # ============================================
 # MAIN STATE: TypedDict for LangGraph compatibility
 # ============================================
@@ -151,12 +122,21 @@ class AutoDevState(TypedDict):
     
     branch_name: str
     """Target branch for PR (e.g., 'main', 'develop')"""
-    
-    user_id: str
-    """User who initiated this run (for multi-tenancy)"""
-    
+
     session_id: str
     """Unique run identifier (UUID) for tracking"""
+
+    arena_trace_id: str
+    """Groups all 3 strategies together (same for A, B, C)"""
+
+    version_id: str
+    """strategy_a, strategy_b, or strategy_c"""
+
+    strategy_name: str
+    """Human-readable name (e.g., "GPT-4o Chain-of-Thought")"""
+
+    temperature: float  
+    """Controls the randomness of the model's output"""
     
     # ============================================
     # ENGINE: ReAct message history
@@ -196,12 +176,6 @@ class AutoDevState(TypedDict):
     }
     """
 
-    manifests: Optional[dict[str, str]]
-    """
-    Project manifest files (package.json, requirements.txt, etc.).
-    Format: {"frontend/package.json": "<content>", ...}
-    """
-
     # ============================================
     # NODE STATE: Planning Phase
     # ============================================
@@ -223,15 +197,9 @@ class AutoDevState(TypedDict):
                     }
                 ],
                 "dependencies": list[str],  # Other group_ids this depends on
-                "can_parallelize": bool
             }
         ],
         "execution_order": list[str],  # group_ids in execution order
-        "sandbox_config": {
-            "runtimes": list[str],  # e.g., ["python", "node"]
-            "setup_commands": list[str],
-            "test_commands": list[str]
-        }
     }
     """
     
@@ -254,27 +222,6 @@ class AutoDevState(TypedDict):
     """Errors encountered during code generation"""
 
     # ============================================
-    # NODE STATE: Testing Phase
-    # ============================================
-    sandbox_logs: list[str]
-    """Raw logs from sandbox execution"""
-
-    test_results: Optional[list[TestResult]]
-    """Parsed test results (list of TestResult dataclass instances)"""
-
-    test_status: Literal["pending", "running", "passed", "failed"]
-    """Overall test execution status"""
-
-    # ============================================
-    # NODE STATE: Review Phase
-    # ============================================
-    review_feedback: Optional[str]
-    """Feedback from code review agent"""
-    
-    review_status: Literal["pending", "approved", "changes_requested"]
-    """Review decision status"""
-
-    # ============================================
     # NODE STATE: PR Creation Phase
     # ============================================
     pr_url: Optional[str]
@@ -290,8 +237,6 @@ class AutoDevState(TypedDict):
         "retrieving_context",
         "planning",
         "coding",
-        "testing",
-        "reviewing",
         "creating_pr",
         "completed",
         "failed"
@@ -413,7 +358,6 @@ def extract_files_from_context(context_data: dict[str, Any]) -> list[str]:
                 "issue": {...},
                 "repo_context": {...},
                 "files": [{"file_path": str, ...}],
-                "manifests": {...}
             }
     
     Returns:
@@ -469,8 +413,6 @@ def mark_step_complete(
         "retrieving_context",
         "planning",
         "coding",
-        "testing",
-        "reviewing",
         "creating_pr",
         "completed",
         "failed"
@@ -505,38 +447,58 @@ def create_initial_state(
     issue_description: str,
     repo_name: str,
     branch_name: str,
-    user_id: str,
     session_id: str,
-    llm_model: str = "claude-sonnet-4-20250514",
+    arena_trace_id: str,
+    version_id: str,
+    strategy_name: str,
+    llm_model: str,
+    temperature: str,
     max_retries: int = 3
 ) -> AutoDevState:
     """
     Factory function for creating initial AutoDev state with sensible defaults.
     
-    This is the ONLY way to create a new AutoDevState - it ensures all required
-    fields are populated and defaults are set correctly.
-    
     Args:
         issue_id: GitHub issue ID
         issue_description: Full issue text
         repo_name: Repository name (e.g., 'owner/repo')
-        branch_name: Target branch for PR
-        user_id: User initiating the run
-        session_id: Unique run identifier (UUID)
-        llm_model: LLM to use (default: gpt-4)
-        max_retries: Maximum retry attempts (default: 3)
+        branch_name: Target branch for PR (usually 'main')
+        session_id: Unique identifier for THIS strategy run (different per strategy)
+        arena_trace_id: Groups all 3 strategies together (same for A, B, C)
+        version_id: "strategy_a", "strategy_b", or "strategy_c"
+        strategy_name: Human-readable name (e.g., "GPT-4o Creative")
+        llm_model: LLM model to use (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+        temperature: Sampling temperature (0.0 = deterministic, 0.7 = creative)
     
     Returns:
         Fully initialized AutoDevState ready for orchestration
     
     Example:
-        >>> state = create_initial_state(
+        >>> arena_id = f"arena-{uuid.uuid4()}"
+        >>> 
+        >>> # Strategy A: GPT-4o Creative
+        >>> state_a = create_initial_state(
         ...     issue_id="123",
-        ...     issue_description="Add user authentication",
-        ...     repo_name="acme/webapp",
+        ...     issue_description="Add color prop to Node",
+        ...     repo_name="chihaos1/ThinkNode-Test",
         ...     branch_name="main",
-        ...     user_id="user_abc",
-        ...     session_id=str(uuid.uuid4())
+        ...     session_id=str(uuid.uuid4()),
+        ...     arena_trace_id=arena_id,
+        ...     version_id="strategy_a",
+        ...     strategy_name="GPT-4o Creative",
+        ...     model="gpt-4o",
+        ...     temperature=0.7
+        ... )
+        >>> 
+        >>> # Strategy B: Claude Deterministic
+        >>> state_b = create_initial_state(
+        ...     # ... same base params ...
+        ...     arena_trace_id=arena_id,  # SAME
+        ...     session_id=str(uuid.uuid4()),  # DIFFERENT
+        ...     version_id="strategy_b",
+        ...     strategy_name="Claude Deterministic",
+        ...     model="claude-sonnet-4-20250514",
+        ...     temperature=0.0
         ... )
     """
 
@@ -549,8 +511,13 @@ def create_initial_state(
         issue_description=issue_description,
         repo_name=repo_name,
         branch_name=branch_name,
-        user_id=user_id,
         session_id=session_id,
+
+        # Arena grouping
+        arena_trace_id=arena_trace_id,
+        version_id=version_id,
+        strategy_name=strategy_name,
+        temperature=temperature,
 
         # Engine
         messages=[],
@@ -558,7 +525,6 @@ def create_initial_state(
         # Domain state - Context
         retrieved_files=None,
         repo_context=None,
-        manifests=None,
         context_summary=None,
         
         # Domain state - Planning
@@ -568,16 +534,7 @@ def create_initial_state(
         # Domain state - Coding
         generated_code={},
         code_generation_errors=[],
-        
-        # Domain state - Testing
-        sandbox_logs=[],
-        test_results=None,
-        test_status="pending",
-        
-        # Domain state - Review
-        review_feedback=None,
-        review_status="pending",
-
+    
         # Domain state - PR
         pr_url=None,
         pr_number=None,

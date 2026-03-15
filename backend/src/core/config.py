@@ -45,11 +45,8 @@ class Settings(BaseSettings):
     PINECONE_API_KEY: SecretStr
     PINECONE_INDEX_NAME: str
 
-    # Celery Settings
-    CELERY_BROKER_URL: str
-    CELERY_RESULT_BACKEND: str
-
-    # Sandbox Settings
-    SANDBOX_URL: str
+    # PostHog Settings
+    POSTHOG_API_KEY: SecretStr
+    POSTHOG_HOST: str
 
 settings: Settings = Settings()

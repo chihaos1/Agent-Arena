@@ -1,7 +1,7 @@
+import json
 import logging
 
-from anthropic import Anthropic
-from anthropic.types import Message
+from litellm import completion, completion_cost
 
 from core.config import settings
 from schemas.response.agents.context import ContextAssemblerResponse
@@ -11,9 +11,10 @@ logger = logging.getLogger(__name__)
 class PlannerAgent:
     """Creates execution plan with file grouping and retry logic"""
 
-    def __init__(self):
-        self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
-
+    def __init__(self, model: str = None, temperature: float = 0.0):
+        self.model = model or "claude-sonnet-4-20250514"
+        self.temperature = temperature
+        
     def create_plan(self, context: ContextAssemblerResponse) -> dict:
         """
         Orchestrates a two-stage agentic workflow to generate and refine a code execution plan.
@@ -45,48 +46,50 @@ class PlannerAgent:
             "content": self._build_creation_prompt(context)
         })
 
-        response: Message = self.client.messages.create(
-            model=settings.CLAUDE_MODEL,
-            max_tokens=settings.CLAUDE_MAX_TOKENS,
-            temperature=0,
-            system=self._get_system_prompt(),
+        response = completion(
+            model=self.model,                    
+            messages=[
+                {"role": "system", "content": self._get_system_prompt()},
+                *messages
+            ],
+            temperature=self.temperature,       
             tools=self._get_tool_schema(),
-            tool_choice = {"type": "tool", "name": "create_execution_plan"},
-            messages=messages
+            tool_choice={                                         
+                "type": "function",
+                "function": {"name": "create_execution_plan"}
+    }
         )
+    
         initial_plan = self._extract_plan(response)
         tool_use_id = self._extract_tool_use_id(response)
         
         # Review initial plan
-        messages.extend(
-            [{
+        messages.extend([
+            {
                 "role": "assistant",
-                "content": response.content
+                "content": None,
+                "tool_calls": response.choices[0].message.tool_calls
+            },
+            {
+                "role": "tool",
+                "tool_call_id": tool_use_id,
+                "content": "Plan created successfully."
             },
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": "Plan created successfully."
-                    },
-                    {
-                        "type": "text",
-                        "text": self._build_reflection_prompt()
-                    }
-                ]
-            }]
-        )
+                "content": self._build_reflection_prompt()
+            }
+        ])
 
-        response: Message = self.client.messages.create(
-            model=settings.CLAUDE_MODEL,
-            max_tokens=settings.CLAUDE_MAX_TOKENS,
-            temperature=0,
-            system=self._get_system_prompt(),
+        response = completion(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self._get_system_prompt()},
+                *messages
+            ],
+            temperature=self.temperature,
             tools=self._get_tool_schema(),
-            tool_choice = {"type": "auto"},
-            messages=messages
+            tool_choice="auto"
         )
         
         reflected_plan: dict = self._extract_plan(response)
@@ -99,92 +102,127 @@ class PlannerAgent:
     def _get_system_prompt(self) -> str:
         return """
 
-            You are an AI planner with two primary responsibilities:
+            You are an AI planner for an autonomous coding agent.
 
-            **Job 1 - Architect:** Create a minimal, dependency-aware execution plan to resolve the GitHub issue.
-            **Job 2 - DevOps:** Configure the sandbox environment (runtimes and commands) based on repository manifests to ensure the plan can be verified.
+            Your job: Create a minimal, focused execution plan to resolve the GitHub issue.
 
-            ---
+            ## Planning Guidelines
 
-            ## JOB 1: EXECUTION PLAN (Code Architecture)
+            1. **Filter ruthlessly**: Only include files that directly need changes
+            - Exclude: context files, unrelated files, files in wrong layer
+            - Include: Only files that must change to solve the issue
 
-            **Instructions:**
+            2. **Start simple**: Prefer fewer files over more
+            - Good: 1-2 files
+            - Acceptable: 3-4 files
+            - Red flag: 5+ files (probably over-engineering)
 
-            1. **Filter ruthlessly**: Only include files that need changes. Exclude context files, wrong layer, unrelated files.
-            2. **Start simple**: Include only essential files. Avoid "nice to have" additions. Prefer 2-4 files over 6+ files.
-            3. **Group dependencies**: Files that import each other → same group. Independent → separate groups.
-            4. **Order by dependencies**: Base files before dependents.
+            3. **Group related files**: Files that work together go in same group
+            - Same component/feature → same group
+            - Independent changes → separate groups
 
-            **File Schema — use exactly these field names:**
-            Each file in file_groups MUST use this exact structure:
-            {{"file_path": "path/to/file.tsx", "action": "create|modify|delete", "changes": "what to change"}}
+            4. **Order by dependencies**: Process dependencies before dependents
+            - Base/utility files first
+            - Components that use them second
 
-            - Use `file_path` not `path`, `filepath`, or `filename`
-            - Use `changes` not `description`, `change`, or `summary`
+            ## Critical: Exact Field Names
 
-            **Guidelines:**
-            - Be specific in `changes` field
-            - If unsure if file is needed, exclude it
-
-            **Example:**
-
-            Issue: "Add export to PDF feature"
-
-            Good plan:
+            Each file MUST use this exact structure:
+            ```json
+            {
+            "file_path": "path/to/file.tsx",     // NOT "path", "filepath", or "filename"
+            "action": "modify",                   // "create" | "modify" | "delete"
+            "changes": "specific changes needed"  // NOT "description" or "summary"
+            }
             ```
-            file_groups: [
-            {{
-                group_id: "pdf-export",
-                files: [
-                    {{"file_path": "utils/PDFGenerator.js", "action": "create", "changes": "PDF generation utility using jsPDF"}},
-                    {{"file_path": "ReportViewer.js", "action": "modify", "changes": "Add Export button calling PDFGenerator"}}
+
+            ## Example Plans
+
+            ### GOOD Plan
+            Issue: "Add color prop to Node component"
+            ```json
+            {
+            "understanding": "Add color prop to Node component to allow customization",
+            "file_groups": [
+                {
+                "group_id": "add-color-prop",
+                "description": "Add color prop to Node component",
+                "files": [
+                    {
+                    "file_path": "src/components/Node.tsx",
+                    "action": "modify",
+                    "changes": "Add color prop to interface and apply to node styling"
+                    }
                 ]
-            }}
+                }
+            ],
+            "execution_order": ["add-color-prop"]
+            }
+            ```
+
+            Why good: Minimal (1 file), specific changes, correct field names
+
+            ### BAD Plan
+            ```json
+            {
+            "file_groups": [
+                {
+                "files": [
+                    "Node.tsx",
+                    "NodeContainer.tsx", 
+                    "index.ts",
+                    "types.ts"
+                ]
+                }
             ]
+            }
             ```
 
-            Bad plan:
-            ```
-            file_groups: [
-            {{"files": ["PDFGenerator.js", "ReportViewer.js"]}}
+            Why bad:
+            - Files as strings (should be objects)
+            - Missing required fields (file_path, action, changes)
+            - Too many files (over-engineered)
+            - No group_id or description
+
+            ### BAD Plan
+            ```json
+            {
+            "file_groups": [
+                {
+                "group_id": "ui-changes",
+                "files": [
+                    {
+                    "path": "src/Button.tsx",           // Wrong: should be "file_path"
+                    "type": "modify",                   // Wrong: should be "action"
+                    "description": "Add color support"  // Wrong: should be "changes"
+                    }
+                ]
+                }
             ]
+            }
             ```
-            Why bad: Files listed as strings not objects, missing required fields.
 
-            ---
+            Why bad: Wrong field names (path/type/description instead of file_path/action/changes)
 
-            ## JOB 2: SANDBOX CONFIGURATION (Testing Environment)
+            ## Rules
 
-            ** MONOREPO RULE — READ BEFORE WRITING ANY COMMANDS:**
+            - **Conservative scope**: When in doubt, exclude the file
+            - **Specific changes**: "Add color prop to interface" not "Update component"
+            - **No test files**: Unless issue explicitly asks for tests
+            - **No config files**: Unless issue explicitly asks for config changes
+            - **No documentation**: Unless issue explicitly asks for docs
 
-            If any manifest path contains a subdirectory (e.g. `frontend/package.json`, not `package.json`),
-            every single command MUST be prefixed with `cd <subdir> &&` as one string.
+            ## Plan Structure
 
-            ✓ CORRECT: `cd frontend && npm install`
-            ✗ WRONG: `npm install`
+            Required fields:
+            - `understanding`: Brief analysis (1-2 sentences)
+            - `file_groups`: Array of file groups
+            - `group_id`: Unique identifier (e.g., "add-feature-x")
+            - `description`: What this group accomplishes
+            - `files`: Array of file objects with exact field names above
+            - `execution_order`: Array of group_ids in processing order
 
-            This applies to ALL setup_commands and test_commands — no exceptions. 
-
-            **Runtime Detection:**
-            - `package.json` → node | `requirements.txt` / `pyproject.toml` → python | `go.mod` → go
-            - Multiple manifests → multiple runtimes
-            - Lockfile signals: `yarn.lock` → yarn | `pnpm-lock.yaml` → pnpm | none → npm
-
-            **Runtime Constraints:**
-            - Node.js 18 | Python 3.12 | Go 1.21 — do not require newer versions
-
-            **Commands:**
-            - Node.js: `npm run build` ONLY — no `npm test` or `npm run test`
-            - Python: `pytest`
-            - Go: `go test ./...`
-            - Only run commands for languages present in your file_groups
-
-            ---
-            
-            Use create_execution_plan tool. Focus on:
-            - Job 1: Minimal files that solve the immediate issue
-            - Job 2: Correct sandbox runtimes and commands based on manifests and modified file types
-
+            Use the create_plan tool to return your execution plan.
         """
 
     def _build_creation_prompt(self, context) -> str:
@@ -201,21 +239,6 @@ class PlannerAgent:
             files_text += f"Signatures: {file["signatures"]}\n"
             files_text += f"Imports: {file["imports"]}"
 
-        # Build context for manifests
-        manifests = context.get("manifests", {})
-
-        manifests_text = ""
-        if manifests:
-            manifests_text = "\n\n**Project Manifests:**\n"
-            manifests_text += "Found: " + ", ".join(manifests.keys()) + "\n"
-
-            # Include full content for key manifests only
-            key_manifests = ['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml']
-            for path, content in manifests.items():
-                if any(key in path for key in key_manifests):
-                    display_content = content[:500] + "\n... [TRUNCATED] ...\n" if len(content) > 500 else content
-                    manifests_text += f"\n### {path}\n```\n{display_content}\n```\n"
-
         return f"""
 
             Create an execution plan for this issue.
@@ -226,21 +249,13 @@ class PlannerAgent:
             **Existing Files (from search - for Job 1 - Execution Plan):**
             {files_text}
 
-            **Existing Manifests (from search - for Job 2 - Sandbox Configurations):**
-            {manifests_text}
-
-            **Your Two Jobs:**
+            **Your Job:**
             
-            1. **Job 1 (Architect):** Analyze the existing files and create a minimal execution plan.
+            1. Analyze the existing files and create a minimal execution plan.
             - Filter to only essential files
             - Group by dependencies
             - Specify exact changes needed
             
-            2. **Job 2 (DevOps):** Analyze the manifests and configure the sandbox.
-            - Detect runtimes from manifests
-            - Generate setup commands
-            - Generate test commands with smart pruning (only test modified file types)
-
             Use create_execution_plan tool.
 
         """
@@ -264,10 +279,12 @@ class PlannerAgent:
         """Tool schema for creating execution plan"""
 
         return [
-            {
+        {
+            "type": "function",  
+            "function": {        
                 "name": "create_execution_plan",
                 "description": "Create execution plan with file grouping",
-                "input_schema": {
+                "parameters": {  
                     "type": "object",
                     "properties": {
                         "understanding": {"type": "string"},
@@ -276,7 +293,10 @@ class PlannerAgent:
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "group_id": {"type": "string"},
+                                    "group_id": {
+                                        "type": "string",
+                                        "description": "REQUIRED: Unique identifier for this group (e.g., 'add-color-prop'). Use snake_case."
+                                    },
                                     "description": {"type": "string"},
                                     "files": {
                                         "type": "array",
@@ -292,51 +312,40 @@ class PlannerAgent:
                                         }
                                     },
                                     "dependencies": {"type": "array", "items": {"type": "string"}},
-                                    "can_parallelize": {"type": "boolean"}
                                 },
-                                "required": ["group_id", "description", "files", "dependencies", "can_parallelize"]
+                                "required": ["group_id", "description", "files", "dependencies"]
                             }
                         },
                         "execution_order": {"type": "array", "items": {"type": "string"}},
-                        "sandbox_config": {
-                            "type": "object",
-                            "description": "Configuration for sandbox testing environment",
-                            "properties": {
-                                "runtimes": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "Detected runtimes (e.g., ['node', 'python'])"
-                                },
-                                "setup_commands": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "Commands to set up environment (e.g., ['npm install', 'pip install -e .'])"
-                                },
-                                "test_commands": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "Commands to run tests (e.g., ['npm test', 'pytest']). Use smart pruning."
-                                }
-                            },
-                            "required": ["runtimes", "setup_commands", "test_commands"]
-                        }
                     },
                     "required": ["understanding", "file_groups", "execution_order"]
                 }
-            }
-        ]
+            }  
+        }
+    ]
     
-    def _extract_plan(self, response: Message) -> dict:
+    def _extract_plan(self, response) -> dict:
         """Extracts plan from tool use"""
 
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "create_execution_plan": 
-                return block.input
-        return None
+        try:
+            message = response.choices[0].message
+            if hasattr(message, 'tool_calls') and message.tool_calls:
+                for tool_call in message.tool_calls:
+                    if tool_call.function.name == "create_execution_plan":
+                        return json.loads(tool_call.function.arguments)
+            return None
+        except Exception as e:
+            logger.error(f"Failed to extract plan: {e}")
+            return None
     
-    def _extract_tool_use_id(self, response: Message) -> str:
+    def _extract_tool_use_id(self, response) -> str:
         """Extracts the tool_use ID associated with a tool call to ensure conversation integrity"""
 
-        for block in response.content:
-            if block.type == "tool_use":
-                return block.id
+        try:
+            message = response.choices[0].message
+            if hasattr(message, 'tool_calls') and message.tool_calls:
+                return message.tool_calls[0].id
+            return None
+        except Exception as e:
+            logger.error(f"Failed to extract tool ID: {e}")
+            return None

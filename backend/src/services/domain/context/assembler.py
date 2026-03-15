@@ -14,10 +14,11 @@ logger = logging.getLogger(__name__)
 class ContextAgent:
     """Assemble context for issue by finding relevant files"""
 
-    def __init__(self, github_token):
+    def __init__(self, github_token, strategy_name):
         self.vector_store = VectorStore()
         self.parser = CodeParser()
         self.github_token = github_token
+        self.strategy_name = strategy_name 
 
     def assemble_context(self, query: str, repo_name: str) -> Dict[str, List]:
         """
@@ -56,16 +57,13 @@ class ContextAgent:
             # Connect to GitHub repo
             repo = github_client.get_repo(repo_name)
             languages = repo.get_languages()
-
-            # Fetch project manifest files
-            manifests = self._fetch_manifests(repo)
             
             for file in relevant_files:
                     
                 # Fetch scripts from GitHub
                 content_raw = repo.get_contents(file["file_path"])
                 content = content_raw.decoded_content.decode("utf-8", errors="ignore")
-                logger.info(f"Fetched {file["file_path"]}")
+                logger.info(f"{self.strategy_name} fetched {file["file_path"]}")
 
                 # Extract code signatures from CodeParser
                 result = self.parser.extract_code_excerpt(file["file_path"], content)
@@ -82,7 +80,6 @@ class ContextAgent:
                 "language_stack": list(languages.keys())
             },
             "files": relevant_files,
-            "manifests": manifests 
         }
 
     def _search_relevant_files(
@@ -161,7 +158,7 @@ class ContextAgent:
 
         try: 
             default_branch = repo.default_branch
-            logger.info(f"Searching {repo_name} for: {target_filenames} in {default_branch}")
+            logger.info(f"{self.strategy_name} searching {repo_name} for: {target_filenames} in {default_branch}")
 
             #  1. Get the full tree map
             tree = repo.get_git_tree(default_branch, recursive=True)
@@ -193,36 +190,12 @@ class ContextAgent:
 
                             results[item.path] = content
 
-                            logger.info(f"Fetched {item.path} (SHA: {item.sha[:7]})")
+                            logger.info(f"{self.strategy_name}: Fetched {item.path} (SHA: {item.sha[:7]})")
 
                         except Exception as e:
-                            logger.error(f"Failed to fetch blob for {item.path}: {e}")
+                            logger.error(f"{self.strategy_name}: Failed to fetch blob for {item.path}: {e}")
             
             return results
 
         except Exception as e:
             logger.error(f"Tree search failed for {repo_name}: {e}")
-
-    def _fetch_manifests(self, repo: Repository):
-        """Fetch project manifest files using _search_repo_tree"""
-
-        manifest_filenames = {
-
-            # Primary manifests
-            'package.json',        
-            'requirements.txt',    
-            'pyproject.toml',
-            'go.mod',              
-            'Cargo.toml',          
-            
-            # Build configs
-            'tsconfig.json',
-            'vite.config.ts',
-            'eslint.config.js',
-            
-            # Infrastructure
-            'Dockerfile',
-            'docker-compose.yml',
-        }
-
-        return self._search_repo_tree(repo, manifest_filenames)

@@ -2,7 +2,7 @@ import logging
 import sys
 
 def setup_logging():
-    """Configure logging for sandbox executor"""
+    """Configure logging for Agent Arena """
 
     logging.basicConfig(
         level=logging.INFO,

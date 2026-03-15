@@ -25,14 +25,30 @@ def approve(state: AutoDevState) -> dict:
     logger.info(f"Approval gate triggered for step: {state['current_step']}, session: {state['session_id']}")
     return {}
 
-def build_graph(github_token: str, enable_checkpointing: bool = True):
-    """Build the AutoDev ReAct graph"""
+def build_graph(github_token: str, strategy_name:str, model: str, temperature: float, enable_checkpointing: bool = True):
+    """
+    Build the AutoDev ReAct workflow graph.
+    
+    Args:
+        github_token: GitHub Personal Access Token
+        model: LLM model for planning
+        temperature: Sampling temperature for planning
+        enable_checkpointing: Enable state persistence
+    
+    Returns:
+        Compiled LangGraph workflow
+    """
 
     logger.info("Building AutoDev graph...")
 
     # Create tools
-    tools = create_tools(github_token)
-    logger.info(f"Initialized {len(tools)} tools: {list(tools.keys())}")
+    tools = create_tools(
+        github_token=github_token,
+        strategy_name=strategy_name,
+        model=model,
+        temperature=temperature
+    )
+    logger.info(f"{strategy_name}: Initialized {len(tools)} tools: {list(tools.keys())}")
 
     # Build graph
     workflow = StateGraph(AutoDevState)
@@ -65,8 +81,8 @@ def build_graph(github_token: str, enable_checkpointing: bool = True):
     )
 
     if enable_checkpointing: 
-        logger.info("Compiling graph with checkpointing enabled")
+        logger.info(f"{strategy_name}: Compiling graph with checkpointing enabled")
         return workflow.compile(checkpointer=MemorySaver())
 
-    logger.info("Compiling graph without checkpointing")
+    logger.info(f"{strategy_name}: Compiling graph without checkpointing")
     return workflow.compile()

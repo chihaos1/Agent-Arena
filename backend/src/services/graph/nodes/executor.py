@@ -11,10 +11,99 @@ from datetime import datetime
 
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import BaseTool
+from services.observability.posthog_client import posthog
 
 from ..state import AutoDevState
 
 logger = logging.getLogger(__name__)
+
+PHASE_MAP = {
+    'retrieve_context': 'retrieving_context',
+    'create_plan': 'planning',
+    'generate_code': 'coding',
+    'create_pr': 'reviewing'
+}
+
+def track_phase_entered(state: AutoDevState, phase: str, tool_name: str):
+    """Track when agent enters a new phase."""
+    session_id = state.get('session_id', 'unknown')
+    
+    posthog.capture(
+        distinct_id=session_id,
+        event='agent_phase_entered',
+        properties={
+            'phase': phase,
+            'tool': tool_name,
+            'arena_trace_id': state.get('arena_trace_id'),
+            'version_id': state.get('version_id'),
+            'strategy_name': state.get('strategy_name'),
+            'model': state.get('llm_model'),
+            'temperature': state.get('temperature'),
+            'timestamp': datetime.now().isoformat()
+        }
+    )
+
+def track_tool_called(state: AutoDevState, phase: str, tool_name: str, duration: float):
+    """Track successful tool execution."""
+    session_id = state.get('session_id', 'unknown')
+    
+    posthog.capture(
+        distinct_id=session_id,
+        event='agent_tool_called',
+        properties={
+            'phase': phase,
+            'tool': tool_name,
+            'total_duration_s': duration,
+            'success': True,
+            'arena_trace_id': state.get('arena_trace_id'),
+            'version_id': state.get('version_id'),
+            'strategy_name': state.get('strategy_name'),
+            'model': state.get('llm_model'),
+            'temperature': state.get('temperature'),
+            'timestamp': datetime.now().isoformat()
+        }
+    )
+
+def track_phase_exited(state: AutoDevState, phase: str, duration: float, success: bool = True):
+    """Track when agent exits a phase."""
+    session_id = state.get('session_id', 'unknown')
+    
+    posthog.capture(
+        distinct_id=session_id,
+        event='agent_phase_exited',
+        properties={
+            'phase': phase,
+            'total_duration_s': duration,
+            'success': success,
+            'arena_trace_id': state.get('arena_trace_id'),
+            'version_id': state.get('version_id'),
+            'strategy_name': state.get('strategy_name'),
+            'model': state.get('llm_model'),
+            'temperature': state.get('temperature'),
+            'timestamp': datetime.now().isoformat()
+        }
+    )
+
+def track_tool_failed(state: AutoDevState, phase: str, tool_name: str, error: Exception):
+    """Track tool execution failure."""
+    session_id = state.get('session_id', 'unknown')
+    
+    posthog.capture(
+        distinct_id=session_id,
+        event='agent_tool_failed',
+        properties={
+            'phase': phase,
+            'tool': tool_name,
+            'error_type': type(error).__name__,
+            'error_message': str(error),
+            'arena_trace_id': state.get('arena_trace_id'),
+            'version_id': state.get('version_id'),
+            'strategy_name': state.get('strategy_name'),
+            'model': state.get('llm_model'),
+            'temperature': state.get('temperature'),
+            'timestamp': datetime.now().isoformat()
+        }
+    )
 
 def create_tool_summary(state: AutoDevState, tool_name: str, result: dict) -> str:
     """Create agent-readable summary of tool execution results."""
@@ -50,8 +139,6 @@ def create_tool_summary(state: AutoDevState, tool_name: str, result: dict) -> st
     elif tool_name == "generate_code":
         files = result.get("generated_files", [])
         file_list = "\n".join([f"- {file['path']}" for file in files])
-        sandbox_config = state["execution_plan"]["sandbox_config"]
-        logger.info(f"sandbox_config being used: {state['execution_plan']['sandbox_config']}")
         
         return f"""
         
@@ -60,34 +147,9 @@ def create_tool_summary(state: AutoDevState, tool_name: str, result: dict) -> st
         Generated {len(files)} files:
         {file_list}
 
-        Ready to test the code in sandbox with run_sandbox.
-        
-        Pass this sandbox_config to run_sandbox:
-        {json.dumps(sandbox_config, indent=2)}
+        Ready to create pull request with create_pr
         
         """
-    
-    elif tool_name == "run_sandbox":
-        test_results = result.get("test_results", {})
-        test_status = result.get("test_status", "unknown")
-        
-        passed = test_results.get("passed", False)
-        duration = test_results.get("duration_seconds", 0)
-        output = test_results.get("output", "")
-
-        output_preview = output[:500] if output else "No output"
-
-        return f"""
-        
-        run_sandbox completed. Tests {"PASSED" if passed else "FAILED"}
-
-        Duration: {duration:.1f}s
-        Status: {test_status}
-
-        Output preview:
-        {output_preview}
-
-        Ready to create pull request with create_pr"""
 
     elif tool_name == "create_pr":
         pr_url = result.get("pr_url", "")
@@ -120,17 +182,24 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
         - [tool-specific fields]: Unpacked from tool results (e.g., retrieved_files, execution_plan)
     """
 
-    logger.info(f"Tool executor starting for session {state['session_id']}")
+    # 1. Get the session ID from the state
+    session_id = state.get('session_id')
+    strategy_context = f"[{state.get('version_id', 'unknown')}|{state.get('strategy_name', 'unknown')}]"
+
+    if not session_id or session_id == 'unknown':
+        logger.warning(f"{strategy_context}: No session_id in state")
+
+    logger.info(f"{strategy_context}: Tool executor starting for session {session_id}")
 
     # 1. Get the last message from agent
     if not state["messages"]:
-        logger.warning("No messages in state, nothing to execute")
+        logger.warning(f"{strategy_context}: No messages in state, nothing to execute")
         return {}
 
     # 2. Check if there are tool calls to execute
     last_message = state["messages"][-1]
     if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
-        logger.info("No tool calls in last message, skipping execution")
+        logger.info(f"{strategy_context}: No tool calls in last message, skipping execution")
         return {}
 
     # 3. Execute each tool call sequentially
@@ -138,11 +207,17 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
     state_updates = {}
 
     for tool_call in last_message.tool_calls:
+        
         tool_name = tool_call["name"]
         tool_args = tool_call["args"]
         tool_call_id = tool_call["id"]
 
-        logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
+        logger.info(f"{strategy_context}: Executing tool - {tool_name} with args - {tool_args}")
+
+        # Tracking for PostHog
+        phase = PHASE_MAP.get(tool_name)
+        if phase:
+            track_phase_entered(state, phase, tool_name)
 
         try:
             if tool_name not in tools:
@@ -155,7 +230,7 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
             result = tool_function.invoke(tool_args)
             duration = (datetime.now() - start_time).total_seconds()
 
-            logger.info(f"Tool {tool_name} completed successfully in {duration:.2f}s")
+            logger.info(f"{strategy_context}: Tool {tool_name} completed successfully in {duration:.2f}s")
 
             # Unpack tool result to update the state
             if isinstance(result, dict):
@@ -170,21 +245,26 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
                     name=tool_name
                 )
                     
-                logger.debug(f"Tool {tool_name} updated fields: {list(result.keys())}")
+                logger.debug(f"{strategy_context}: Tool {tool_name} updated fields: {list(result.keys())}")
 
             else:
-                logger.warning(f"Tool {tool_name} returned non-dict result: {type(result)}")
+                logger.warning(f"{strategy_context}: Tool {tool_name} returned non-dict result: {type(result)}")
                 
                 tool_message = ToolMessage(
                     content=str(result),
                     tool_call_id=tool_call_id,
                     name=tool_name
                 )
+
+            # Tracking for PostHog
+            track_tool_called(state, phase, tool_name, duration)
+            if phase:
+                track_phase_exited(state, phase, duration, success=True)
             
             tool_messages.append(tool_message)
 
         except Exception as e:
-            logger.error(f"Tool {tool_name} failed: {e}", exc_info=True)            
+            logger.error(f"{strategy_context}: Tool {tool_name} failed: {e}", exc_info=True)           
             error_message = f"Tool '{tool_name}' failed with error: {type(e).__name__}: {str(e)}"
             
             tool_message = ToolMessage(
@@ -192,11 +272,14 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
                 tool_call_id=tool_call_id,
                 name=tool_name
             )
+
+            # Tracking for PostHog
+            track_tool_failed(state, phase, tool_name, e)
             
             tool_messages.append(tool_message)
 
     logger.info(
-        f"Tool execution completed. "
+        f"{strategy_context}: Tool execution completed. "
         f"Returning {len(tool_messages)} messages and {len(state_updates)} state updates"
     )
     

@@ -17,7 +17,7 @@ from services.graph.state import AutoDevError
 
 logger = logging.getLogger(__name__)
 
-def create_context_tool(github_token: str):
+def create_context_tool(github_token: str, strategy_name: str):
     """
     Creates a context retrieval tool using ContextAssembler.
     
@@ -32,7 +32,7 @@ def create_context_tool(github_token: str):
         >>> # LLM can now call: retrieve_context(query="...", repo_name="...")
     """
 
-    assembler = ContextAgent(github_token=github_token)
+    assembler = ContextAgent(github_token=github_token, strategy_name=strategy_name)
 
     @tool
     def retrieve_context(
@@ -48,7 +48,6 @@ def create_context_tool(github_token: str):
         Returns a context package containing:
         - retrieved_files: List of relevant files with summaries and code signatures
         - repo_context: Repository metadata (name, language stack)
-        - manifests: Project configuration files (package.json, requirements.txt, etc.)
         
         Do NOT rename or restructure fields.
         """
@@ -68,7 +67,6 @@ def create_context_tool(github_token: str):
             return {
                 "retrieved_files": context["files"],
                 "repo_context": context["repo_context"],
-                "manifests": context["manifests"],
                 "current_step": "planning",
                 "updated_at": datetime.now()
             }

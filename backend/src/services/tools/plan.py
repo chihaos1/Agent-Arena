@@ -9,6 +9,7 @@ import logging
 import traceback
 from datetime import datetime
 from typing import Annotated
+
 from langchain_core.tools import tool
 from pydantic import Field
 
@@ -17,10 +18,15 @@ from services.graph.state import AutoDevError
 
 logger = logging.getLogger(__name__)
 
-def create_plan_tool():
+def create_plan_tool(strategy_name: str, model: str, temperature: float):
     """
     Creates a planning tool using PlannerAgent.
     
+    Args:
+        strategy_name: The name of the strategy that is being tested
+        model: LLM model to use (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+        temperature: Sampling temperature (0.0-1.0)
+
     Returns:
         LangGraph tool function that can be called by the ReAct agent
     
@@ -29,7 +35,7 @@ def create_plan_tool():
         >>> # LLM can now call: create_plan(context={...})
     """
 
-    planner = PlannerAgent()
+    planner = PlannerAgent(model=model, temperature=temperature)
 
     @tool
     def create_plan(
@@ -39,7 +45,6 @@ def create_plan_tool():
             - issue_description: The original task/issue
             - retrieved_files: List of files from context retrieval
             - repo_context: Repository metadata
-            - manifests: Project configuration files
             """
         )]
     ) -> dict:
@@ -50,10 +55,9 @@ def create_plan_tool():
         - Understanding of the issue 
         - File groups to modify
         - Execution order
-        - Sandbox configuration for testing
         
         Args:
-            context: Dictionary with retrieved_files, repo_context, manifests
+            context: Dictionary with retrieved_files, repo_context
         
         Returns:
             State update with execution_plan and files_to_modify
@@ -64,7 +68,6 @@ def create_plan_tool():
         issue_description = context.get("issue_description", "")
         retrieved_files = context.get("retrieved_files", [])
         repo_context = context.get("repo_context", {})
-        manifests = context.get("manifests", {})
 
         logger.info(
             f"create_plan called: issue='{issue_description[:50]}...', "
@@ -83,17 +86,6 @@ def create_plan_tool():
                     "imports": file.get("imports", [])
                 })
 
-            # Normalize manifests (sometimes passed in a list)
-            normalized_manifests = {}
-            if isinstance(manifests, list):
-                for manifest in manifests:
-                    file_path = manifest.get("file_path", "")
-                    content = manifest.get("content", "")
-                    if file_path:
-                        normalized_manifests[file_path] = content
-            elif isinstance(manifests, dict):
-                normalized_manifests = manifests
-
             # Transform to the correct context structure
             context = {
                 "issue": {
@@ -101,11 +93,11 @@ def create_plan_tool():
                 },
                 "repo_context": repo_context,
                 "files": normalized_files, 
-                "manifests": normalized_manifests
             }
 
             # Call PlannerAgent
             execution_plan = planner.create_plan(context)
+            logger.info(f"Plan from {strategy_name}: {execution_plan}")
 
             # Extract files to modify from plan
             files_to_modify = []
@@ -114,7 +106,7 @@ def create_plan_tool():
                     files_to_modify.append(file["file_path"])
 
             logger.info(
-                f"Plan created successfully: "
+                f"{strategy_name} created plan successfully: "
                 f"{len(execution_plan.get('file_groups', []))} groups, "
                 f"{len(files_to_modify)} files to modify"
             )
@@ -128,7 +120,7 @@ def create_plan_tool():
 
         except Exception as e:
             logger.error(
-                f"Plan creation failed: {type(e).__name__}: {str(e)}",
+                f"{strategy_name} failed to create plan: {type(e).__name__}: {str(e)}",
                 exc_info=True
             )
             
