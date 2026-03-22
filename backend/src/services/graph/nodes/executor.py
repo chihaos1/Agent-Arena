@@ -5,15 +5,21 @@ Executes tool calls decided by the agent.
 Separates decision-making (agent) from execution (this node).
 """
 
-import json
 import logging
 from datetime import datetime
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from services.observability.posthog_client import posthog
 
 from ..state import AutoDevState
+from services.observability.tracking import (
+    track_phase_entered,
+    track_phase_exited,
+    track_tool_called,
+    track_tool_failed
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -23,87 +29,6 @@ PHASE_MAP = {
     'generate_code': 'coding',
     'create_pr': 'reviewing'
 }
-
-def track_phase_entered(state: AutoDevState, phase: str, tool_name: str):
-    """Track when agent enters a new phase."""
-    session_id = state.get('session_id', 'unknown')
-    
-    posthog.capture(
-        distinct_id=session_id,
-        event='agent_phase_entered',
-        properties={
-            'phase': phase,
-            'tool': tool_name,
-            'arena_trace_id': state.get('arena_trace_id'),
-            'version_id': state.get('version_id'),
-            'strategy_name': state.get('strategy_name'),
-            'model': state.get('llm_model'),
-            'temperature': state.get('temperature'),
-            'timestamp': datetime.now().isoformat()
-        }
-    )
-
-def track_tool_called(state: AutoDevState, phase: str, tool_name: str, duration: float):
-    """Track successful tool execution."""
-    session_id = state.get('session_id', 'unknown')
-    
-    posthog.capture(
-        distinct_id=session_id,
-        event='agent_tool_called',
-        properties={
-            'phase': phase,
-            'tool': tool_name,
-            'total_duration_s': duration,
-            'success': True,
-            'arena_trace_id': state.get('arena_trace_id'),
-            'version_id': state.get('version_id'),
-            'strategy_name': state.get('strategy_name'),
-            'model': state.get('llm_model'),
-            'temperature': state.get('temperature'),
-            'timestamp': datetime.now().isoformat()
-        }
-    )
-
-def track_phase_exited(state: AutoDevState, phase: str, duration: float, success: bool = True):
-    """Track when agent exits a phase."""
-    session_id = state.get('session_id', 'unknown')
-    
-    posthog.capture(
-        distinct_id=session_id,
-        event='agent_phase_exited',
-        properties={
-            'phase': phase,
-            'total_duration_s': duration,
-            'success': success,
-            'arena_trace_id': state.get('arena_trace_id'),
-            'version_id': state.get('version_id'),
-            'strategy_name': state.get('strategy_name'),
-            'model': state.get('llm_model'),
-            'temperature': state.get('temperature'),
-            'timestamp': datetime.now().isoformat()
-        }
-    )
-
-def track_tool_failed(state: AutoDevState, phase: str, tool_name: str, error: Exception):
-    """Track tool execution failure."""
-    session_id = state.get('session_id', 'unknown')
-    
-    posthog.capture(
-        distinct_id=session_id,
-        event='agent_tool_failed',
-        properties={
-            'phase': phase,
-            'tool': tool_name,
-            'error_type': type(error).__name__,
-            'error_message': str(error),
-            'arena_trace_id': state.get('arena_trace_id'),
-            'version_id': state.get('version_id'),
-            'strategy_name': state.get('strategy_name'),
-            'model': state.get('llm_model'),
-            'temperature': state.get('temperature'),
-            'timestamp': datetime.now().isoformat()
-        }
-    )
 
 def create_tool_summary(state: AutoDevState, tool_name: str, result: dict) -> str:
     """Create agent-readable summary of tool execution results."""
@@ -185,18 +110,13 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
     # 1. Get the session ID from the state
     session_id = state.get('session_id')
     strategy_context = f"[{state.get('version_id', 'unknown')}|{state.get('strategy_name', 'unknown')}]"
-
-    if not session_id or session_id == 'unknown':
-        logger.warning(f"{strategy_context}: No session_id in state")
-
     logger.info(f"{strategy_context}: Tool executor starting for session {session_id}")
 
-    # 1. Get the last message from agent
+    # 2. Check if there are tool calls to execute
     if not state["messages"]:
         logger.warning(f"{strategy_context}: No messages in state, nothing to execute")
         return {}
 
-    # 2. Check if there are tool calls to execute
     last_message = state["messages"][-1]
     if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
         logger.info(f"{strategy_context}: No tool calls in last message, skipping execution")
@@ -256,11 +176,9 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
                     name=tool_name
                 )
 
-            # Tracking for PostHog
             track_tool_called(state, phase, tool_name, duration)
             if phase:
                 track_phase_exited(state, phase, duration, success=True)
-            
             tool_messages.append(tool_message)
 
         except Exception as e:
@@ -273,9 +191,7 @@ def tool_executor(state: AutoDevState, tools: dict[str, BaseTool]) -> dict:
                 name=tool_name
             )
 
-            # Tracking for PostHog
             track_tool_failed(state, phase, tool_name, e)
-            
             tool_messages.append(tool_message)
 
     logger.info(

@@ -16,12 +16,10 @@ from .state import (
     create_initial_state,
     
     # Helpers
-    is_approved,
     add_error,
     should_abort,
     extract_files_from_context,
     extract_files_from_plan,
-    mark_step_complete
 )
 
 __all__ = [
@@ -39,6 +37,5 @@ __all__ = [
     "should_abort",
     "extract_files_from_context",
     "extract_files_from_plan",
-    "mark_step_complete",
     "serialize_state_for_posthog"
 ]

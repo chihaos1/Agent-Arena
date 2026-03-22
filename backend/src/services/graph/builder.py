@@ -15,15 +15,10 @@ from langgraph.checkpoint.memory import MemorySaver
 from .state import AutoDevState
 from .nodes.agent import agent
 from .nodes.executor import tool_executor
-from .routing import should_continue, after_execution, after_approval
+from .routing import should_continue, after_execution
 from ..tools import create_tools
 
 logger = logging.getLogger(__name__)
-
-def approve(state: AutoDevState) -> dict:
-    """Approval gate - returns empty (handled externally)"""
-    logger.info(f"Approval gate triggered for step: {state['current_step']}, session: {state['session_id']}")
-    return {}
 
 def build_graph(github_token: str, strategy_name:str, model: str, temperature: float, enable_checkpointing: bool = True):
     """
@@ -56,7 +51,6 @@ def build_graph(github_token: str, strategy_name:str, model: str, temperature: f
     # Add nodes
     workflow.add_node("agent", lambda state: agent(state, list(tools.values())))
     workflow.add_node("executor", lambda state: tool_executor(state, tools))
-    workflow.add_node("approval", approve)
 
     # Entry point
     workflow.set_entry_point("agent")
@@ -65,12 +59,6 @@ def build_graph(github_token: str, strategy_name:str, model: str, temperature: f
     workflow.add_conditional_edges(
         "agent",
         should_continue,
-        {"execute_tools": "executor", "approval": "approval", "end": END}
-    )
-
-    workflow.add_conditional_edges(
-        "approval",
-        after_approval,
         {"execute_tools": "executor", "end": END}
     )
     

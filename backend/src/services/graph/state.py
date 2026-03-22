@@ -212,7 +212,7 @@ class AutoDevState(TypedDict):
     # ============================================
     # NODE STATE: Coding Phase
     # ============================================
-    generated_code: dict[str, str]
+    generated_files: dict[str, str]
     """
     Generated code by file path.
     Format: {"/path/to/file.py": "new content"}
@@ -243,11 +243,8 @@ class AutoDevState(TypedDict):
     ]
     """Current phase in the orchestration pipeline"""
 
-    approval_gates: dict[str, Literal["pending", "approved", "rejected"]]
-    """
-    Human-in-the-loop approval tracking.
-    Format: {"context": "approved", "plan": "pending", "code": "pending"}
-    """
+    completed_step: Optional[str]
+    """The step that just completed, used for artifact attribution in SSE"""
 
     tool_call_counts: dict[str, int]
     """Track how many times each tool has been called"""
@@ -283,19 +280,6 @@ class AutoDevState(TypedDict):
 # ============================================
 # EXTERNAL HELPER FUNCTIONS: Immutable state operations
 # ============================================
-def is_approved(state: AutoDevState, gate: str) -> bool:
-    """
-    Check if a specific approval gate is approved.
-    
-    Args:
-        state: Current AutoDev state
-        gate: Gate to check (e.g., "context", "plan", "code")
-    
-    Returns:
-        True if gate is approved, False otherwise
-    """
-    return state["approval_gates"].get(gate) == "approved"
-
 def add_error(
     state: AutoDevState,
     step: str,
@@ -407,38 +391,6 @@ def extract_files_from_plan(execution_plan: dict[str, Any]) -> list[str]:
             files.append(file_spec["file_path"])
     return files
 
-def mark_step_complete(
-    state: AutoDevState,
-    next_step: Literal[
-        "retrieving_context",
-        "planning",
-        "coding",
-        "creating_pr",
-        "completed",
-        "failed"
-    ]
-) -> dict[str, Any]:
-    """
-    Mark current step as complete and transition to next step.
-    
-    Args:
-        state: Current AutoDev state
-        next_step: The step to transition to
-    
-    Returns:
-        Partial state update dict
-    """
-
-    update = {
-        "current_step": next_step,
-        "updated_at": datetime.now()
-    }
-    
-    if next_step in ("completed", "failed"):
-        update["completed_at"] = datetime.now()
-    
-    return update
-
 # ============================================
 # INITIATE STATE
 # ============================================
@@ -532,7 +484,7 @@ def create_initial_state(
         files_to_modify=[],
         
         # Domain state - Coding
-        generated_code={},
+        generated_files={},
         code_generation_errors=[],
     
         # Domain state - PR
@@ -541,11 +493,7 @@ def create_initial_state(
         
         # Orchestration control
         current_step="retrieving_context",
-        approval_gates={
-            "context": "pending",
-            "plan": "pending",
-            "code": "pending"
-        },
+        completed_step=None,
         tool_call_counts={},
         retry_count=0,
         max_retries=max_retries,

@@ -16,19 +16,13 @@ from ..state import AutoDevState
 logger = logging.getLogger(__name__)
 
 EXECUTE_TOOLS = "execute_tools"
-APPROVAL = "approval"
 AGENT = "agent"
 END = "end"
-GATE_MAP = {
-        # "retrieving_context": "context",
-        # "planning": "plan",
-        # "coding": "code"
-    }
 
-def should_continue(state: AutoDevState) -> Literal["execute_tools", "approval", "end"]:
+def should_continue(state: AutoDevState) -> Literal["execute_tools", "end"]:
     """Route after agent decides"""
 
-    # Safety: max iterations
+    # Set max retries
     if state["retry_count"] >= state["max_retries"]:
         logger.warning(f"Max retries exceeded for session {state['session_id']}")
         return END
@@ -38,15 +32,9 @@ def should_continue(state: AutoDevState) -> Literal["execute_tools", "approval",
         logger.info(f"Workflow ended: {state['current_step']}")
         return END
 
-    # Check if tool call requires approval
+    # Route to tool execution if tool call present
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        gate = GATE_MAP.get(state["current_step"])
-
-        if gate and state["approval_gates"].get(gate) == "pending":
-            logger.info(f"Approval required for '{gate}' gate")
-            return APPROVAL
-
         logger.info("Proceeding to tool execution")
         return EXECUTE_TOOLS
     
@@ -61,7 +49,7 @@ def after_execution(state: AutoDevState) -> Literal["agent", "end"]:
     Always loops back to agent unless max iterations or terminal state.
     """
     
-    # Safety check
+    # Set max retries
     if state["retry_count"] >= state["max_retries"]:
         logger.warning("Max retries exceeded after execution")
         return END
@@ -74,20 +62,3 @@ def after_execution(state: AutoDevState) -> Literal["agent", "end"]:
     # Loop back to agent
     logger.info("Looping back to agent")
     return AGENT
-
-def after_approval(state: AutoDevState) -> Literal["execute_tools", "end"]:
-    """
-    Route after human approval decision.
-    
-    Approved: execute tools
-    Rejected: end workflow
-    """
-    
-    gate = GATE_MAP.get(state["current_step"])
-    
-    if gate and state["approval_gates"].get(gate) == "approved":
-        logger.info(f"Approval gate '{gate}' approved")
-        return EXECUTE_TOOLS
-    
-    logger.info(f"Approval gate '{gate}' rejected or not found")
-    return END

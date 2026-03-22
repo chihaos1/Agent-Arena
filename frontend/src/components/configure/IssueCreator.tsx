@@ -1,5 +1,4 @@
 import { useState } from "react"
-import toast from 'react-hot-toast'
 
 interface IssueCreatorProps{
     onIssueSaved: (title: string, body: string) => void
@@ -8,17 +7,6 @@ interface IssueCreatorProps{
 export default function IssueCreator({ onIssueSaved }: IssueCreatorProps) {
     const [title, setTitle] = useState('')
     const [body, setBody] = useState('')
-
-    const handleSave = async() => {
-        
-        if (!title.trim() || !body.trim()) {
-            toast.error('Issue title and description must be populated')
-            return
-        }
-        
-        onIssueSaved(title, body)
-
-    }
 
     return (
         <div className="h-full flex flex-col bg-neon-purple rounded-lg border-2 border-neon-teal/30 p-4 font-space-mono overflow-hidden">

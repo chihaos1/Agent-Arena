@@ -6,12 +6,10 @@ Conditional functions that determine graph flow based on state.
 
 from .conditions import (
     should_continue,
-    after_execution,
-    after_approval
+    after_execution
 )
 
 __all__ = [
     "should_continue",
-    "after_execution",
-    "after_approval"
+    "after_execution"
 ]

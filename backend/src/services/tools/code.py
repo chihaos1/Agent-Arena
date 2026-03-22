@@ -7,7 +7,7 @@ Enables the ReAct agent to generate code for file groups from the execution plan
 
 import logging
 import traceback
-from typing import Annotated, Optional
+from typing import Annotated
 from datetime import datetime
 
 from github import Github, Auth
@@ -170,6 +170,7 @@ def create_coder_tool(github_token: str, strategy_name: str, model: str, tempera
                 "generated_files": all_files,
                 "group_results": group_results,
                 "current_step": "creating_pr",
+                "completed_step": "coding",
                 "updated_at": datetime.now()
             }
 
@@ -185,6 +186,7 @@ def create_coder_tool(github_token: str, strategy_name: str, model: str, tempera
                     traceback=traceback.format_exc()
                 )],
                 "current_step": "failed",
+                "completed_step": "coding",
                 "updated_at": datetime.now()
             }
     

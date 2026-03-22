@@ -68,6 +68,7 @@ def create_context_tool(github_token: str, strategy_name: str):
                 "retrieved_files": context["files"],
                 "repo_context": context["repo_context"],
                 "current_step": "planning",
+                "completed_step": "retrieving_context",
                 "updated_at": datetime.now()
             }
         
@@ -87,7 +88,9 @@ def create_context_tool(github_token: str, strategy_name: str):
                     traceback=traceback.format_exc()
                 )],
                 "retry_count": 1,
+                "completed_step": "retrieving_context",
                 "current_step": "failed",
+                "completed_step": "retrieving_context",
                 "updated_at": datetime.now()
             }
         

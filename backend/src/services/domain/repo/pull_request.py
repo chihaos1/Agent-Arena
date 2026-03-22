@@ -95,7 +95,8 @@ def create_pull_request(
         return {
             "pr_number": pr.number,
             "pr_url": pr.html_url,
-            "current_step": "completed"
+            "current_step": "completed",
+            "completed_step": "creating_pr"
         }            
 
     except Exception as e:

@@ -115,6 +115,7 @@ def create_plan_tool(strategy_name: str, model: str, temperature: float):
                 "execution_plan": execution_plan,
                 "files_to_modify": files_to_modify,
                 "current_step": "coding",
+                "completed_step": "planning",
                 "updated_at": datetime.now()
             }
 
@@ -123,7 +124,7 @@ def create_plan_tool(strategy_name: str, model: str, temperature: float):
                 f"{strategy_name} failed to create plan: {type(e).__name__}: {str(e)}",
                 exc_info=True
             )
-            
+             
             return {
                 "errors": [AutoDevError(
                     step="planning",
@@ -134,6 +135,7 @@ def create_plan_tool(strategy_name: str, model: str, temperature: float):
                 )],
                 "retry_count": 1,
                 "current_step": "failed",
+                "completed_step": "planning",
                 "updated_at": datetime.now()
             }
     

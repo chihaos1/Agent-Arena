@@ -9,7 +9,6 @@ import json
 import logging
 import traceback
 from datetime import datetime
-from typing import List
 
 from litellm import completion, completion_cost
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
@@ -17,33 +16,19 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from ..state import AutoDevState, AutoDevError
-from services.observability.posthog_client import posthog
+from services.observability.tracking import (
+    track_agent_error,
+    track_llm_generation
+)
 
 logger = logging.getLogger(__name__)
-
-def serialize_messages(messages: List) -> str:
-    """Serialize last 5 messages as JSON for PostHog."""
-
-    try:
-        recent_messages = messages[-5:] if len(messages) > 5 else messages
-        serialized = []
-
-        for message in recent_messages:
-            if hasattr(message, "content"):
-                serialized.append({
-                    "role": type(message).__name__.replace("Message", "").lower(),
-                    "content": str(message.content)[:500]
-                })
-        return json.dumps(serialized)
-    except:
-        return "[serialization_failed]"
 
 def _convert_to_dict(message) -> dict:
     """
     Convert LangChain message objects to dict format for LiteLLM.
     
     Args:
-        msg: LangChain message (AIMessage, ToolMessage, etc.)
+        message: LangChain message (AIMessage, ToolMessage, etc.)
     
     Returns:
         Dict in OpenAI format that LiteLLM can translate to any provider
@@ -76,7 +61,7 @@ def _convert_to_dict(message) -> dict:
             "content": str(message.content)
         }
 
-def prepare_messages(state: AutoDevState, system_prompt: SystemMessage) -> list[dict]:
+def _prepare_messages(state: AutoDevState, system_prompt: SystemMessage) -> list[dict]:
     """
     Convert all messages to LiteLLM-compatible dict format.
     
@@ -103,7 +88,7 @@ def prepare_messages(state: AutoDevState, system_prompt: SystemMessage) -> list[
     
     return messages
 
-def build_system_prompt(state: AutoDevState) -> SystemMessage:
+def _build_system_prompt(state: AutoDevState) -> SystemMessage:
     """
     Construct system prompt that gives agent context about current state.
     
@@ -162,61 +147,6 @@ def build_system_prompt(state: AutoDevState) -> SystemMessage:
     
     return SystemMessage(content=prompt)
 
-def track_llm_generation(
-    state: AutoDevState,
-    messages: list,
-    response,
-    duration: float,
-    cost: float
-):
-    """Track LLM generation event to PostHog."""
-    session_id = state.get('session_id', 'unknown')
-    assistant_message = response.choices[0].message
-    
-    posthog.capture(
-        distinct_id=session_id,
-        event='$ai_generation',
-        properties={
-            '$ai_model': state['llm_model'],
-            '$ai_input': serialize_messages(messages),
-            '$ai_output': assistant_message.content or "[tool_calls]",
-            '$ai_input_tokens': response.usage.prompt_tokens,
-            '$ai_output_tokens': response.usage.completion_tokens,
-            '$ai_latency_ms': duration,
-            '$ai_cost_usd': cost,
-            '$ai_trace_id': session_id,
-            'arena_trace_id': state.get('arena_trace_id'),
-            'version_id': state.get('version_id'),
-            'strategy_name': state.get('strategy_name'),
-            'model': state['llm_model'],
-            'temperature': state.get('temperature'),
-            'version_id': state.get('version_id'),
-            'phase': state['current_step'],
-            'timestamp': datetime.now().isoformat()
-        }
-    )
-
-def track_agent_error(state: AutoDevState, error: Exception):
-    """Track agent error event to PostHog."""
-    session_id = state.get('session_id', 'unknown')
-    
-    posthog.capture(
-        distinct_id=session_id,
-        event='agent_error',
-        properties={
-            'phase': state['current_step'],
-            'error_type': type(error).__name__,
-            'error_message': str(error),
-            '$ai_trace_id': session_id,
-            'arena_trace_id': state.get('arena_trace_id'),
-            'version_id': state.get('version_id'),
-            'strategy_name': state.get('strategy_name'),
-            'model': state['llm_model'],
-            'temperature': state.get('temperature'),
-            'timestamp': datetime.now().isoformat()
-        }
-    )
-
 def agent(state: AutoDevState, tools: list[BaseTool]) -> dict:
     """
     Core ReAct reasoning loop using LiteLLM.
@@ -247,10 +177,10 @@ def agent(state: AutoDevState, tools: list[BaseTool]) -> dict:
     )
 
     # 1. Build system prompt with most recent context
-    system_prompt = build_system_prompt(state)
+    system_prompt = _build_system_prompt(state)
 
     # 2. Aggregate messages for LLM (system prompt + conversation history)
-    messages = prepare_messages(state, system_prompt)
+    messages = _prepare_messages(state, system_prompt)
     
     # 3. Convert LangChain tools to LiteLLM format
     tool_schemas = [convert_to_openai_tool(tool) for tool in tools]
@@ -329,7 +259,7 @@ def agent(state: AutoDevState, tools: list[BaseTool]) -> dict:
 
         return {
             "errors": [AutoDevError(
-                step="agent_reasoning",
+                step=state["current_step"],
                 error_type="llm_error",
                 message=str(e),
                 timestamp=datetime.now(),

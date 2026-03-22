@@ -78,13 +78,14 @@ def create_pr_tool(github_token: str, strategy_name: str):
             
             return {
                 "errors": [AutoDevError(
-                    step="create_pr",
+                    step="creating_pr",
                     error_type="pr_creation_failed",
                     message=f"Failed to create pull request: {str(e)}",
                     timestamp=datetime.now(),
                     traceback=""
                 )],
                 "current_step": "failed",
+                "completed_step": "creating_pr",
                 "updated_at": datetime.now()
             }
     

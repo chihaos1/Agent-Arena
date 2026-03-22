@@ -1,105 +1,25 @@
 import asyncio
 import logging
+import json
 import time
 import uuid
-from datetime import datetime
+from typing import Dict, List
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from schemas.request.arena.arena import ArenaRequest
-from schemas.response.arena.arena import ArenaResponse, StrategyResult
+from schemas.response.arena.arena import StrategyResult
 from services.graph.state import create_initial_state
 from services.graph.builder import build_graph
-from services.observability.posthog_client import posthog
+from services.observability.tracking import (
+    track_strategy_started,
+    track_strategy_completed,
+    track_strategy_failed,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/arena", tags=["arena"])
-
-def track_arena_started(arena_trace_id: str, request: ArenaRequest):
-    """Track Arena run started in PostHog"""
-    
-    posthog.capture(
-        distinct_id=arena_trace_id,
-        event="arena_run_started",
-        properties={
-            "repo_name": request.repo_name,
-            "issue_id": request.issue_id,
-            "timestamp": datetime.now().isoformat()
-        }
-    )
-
-def track_arena_completed(arena_trace_id: str, duration: int, results: list):
-    """Track Arena run completed in PostHog."""
-    
-    posthog.capture(
-        distinct_id=arena_trace_id,
-        event="arena_run_completed",
-        properties={
-            "total_duration_s": duration,
-            "strategies_completed": len([r for r in results if r.success]),
-            "timestamp": datetime.now().isoformat()
-        }
-    )
-
-def track_arena_failed(arena_trace_id: str, error: Exception):
-    """Track Arena run failed in PostHog"""
-    
-    posthog.capture(
-        distinct_id=arena_trace_id,
-        event="arena_run_failed",
-        properties={
-            "error_type": type(error).__name__,
-            "error_message": str(error),
-            "timestamp": datetime.now().isoformat()
-        }
-    )
-
-def track_strategy_started(arena_trace_id: str, state: dict):
-    """Track individual strategy started in PostHog."""
-    
-    posthog.capture(
-        distinct_id=state["session_id"],
-        event="agent_run_started",
-        properties={
-            "arena_trace_id": arena_trace_id,
-            "version_id": state["version_id"],
-            "strategy_name": state["strategy_name"],
-            "model": state["llm_model"],
-            "temperature": state["temperature"],
-            "timestamp": datetime.now().isoformat()
-        }
-    )
-
-def track_strategy_completed(arena_trace_id: str, state: dict, result: dict, duration: int):
-    """Track individual strategy completed in PostHog."""
-    
-    posthog.capture(
-        distinct_id=state["session_id"],
-        event="agent_run_completed",
-        properties={
-            "arena_trace_id": arena_trace_id,
-            "version_id": state["version_id"],
-            "success": True,
-            "total_cost_usd": result.get("estimated_cost_usd", 0),
-            "total_duration_s": duration,
-            "pr_url": result.get("pr_url"),
-            "timestamp": datetime.now().isoformat()
-        }
-    )
-
-def track_strategy_failed(arena_trace_id: str, state: dict, error: Exception):
-    """Track individual strategy failed in PostHog."""
-    
-    posthog.capture(
-        distinct_id=state["session_id"],
-        event="agent_run_failed",
-        properties={
-            "arena_trace_id": arena_trace_id,
-            "version_id": state["version_id"],
-            "error_type": type(error).__name__,
-            "error_message": str(error),
-            "timestamp": datetime.now().isoformat()
-        }
-    )
 
 def create_arena_states(
     arena_trace_id: str,
@@ -129,15 +49,14 @@ async def run_strategy(
     arena_trace_id: str,
     state: dict,
     graph,   
+    queue: asyncio.Queue
 ) -> StrategyResult:
-    """Execute on of the strategies from the group"""
+    """Execute one of the strategies from the group"""
 
     session_id = state["session_id"]
     version_id = state["version_id"]
 
     logger.info(f"Running {version_id}: {session_id}")
-
-    # Track started
     track_strategy_started(arena_trace_id, state)
 
     try:
@@ -147,7 +66,7 @@ async def run_strategy(
 
         # Execute asynchronously
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, lambda: graph.invoke(state, config))
+        result = await loop.run_in_executor(None, lambda: _stream_graph(graph, state, config, queue, version_id))
 
         duration = int(time.time() - start_time)
         logger.info(f"{version_id} completed in {duration}s")
@@ -167,11 +86,8 @@ async def run_strategy(
 
     except Exception as e:
         logger.error(f"{version_id} failed: {e}")
-        
-        # Track failed
         track_strategy_failed(arena_trace_id, state, e)
         
-        # Return failure result
         return StrategyResult(
             version_id=version_id,
             strategy_name=state["strategy_name"],
@@ -181,10 +97,91 @@ async def run_strategy(
             duration_seconds=0
         )
 
+def _stream_graph(graph, state, config, queue, version_id):
+    """
+    Stream LangGraph execution and emit step updates to the SSE queue.
+    
+    Iterates over graph.stream() chunks, extracting current_step and artifact
+    from each state update and putting them into the shared asyncio queue for
+    real-time SSE delivery to the frontend.
+    
+    Returns the final state chunk for use in StrategyResult construction.
+    """
+    
+    last_completed = None
+    last_chunk = {}
+
+    for state in graph.stream(state, config, stream_mode="values"):
+
+        current_step = state.get("current_step")
+        completed_step = state.get("completed_step")
+
+        if current_step == "failed" and last_completed != "failed":
+            queue.put_nowait({
+                "version_id": version_id,
+                "completed_step": "failed",
+                "current_step": "failed",
+                "artifact": _extract_artifact(state, "failed")
+            })
+            last_completed = "failed"
+        elif completed_step and completed_step != last_completed:
+            queue.put_nowait({
+                "version_id": version_id,
+                "completed_step": completed_step,
+                "current_step": current_step,
+                "artifact": _extract_artifact(state, completed_step)
+            })
+            last_completed = completed_step
+
+        last_chunk = state
+    return last_chunk
+
+def _extract_artifact(state: dict, completed_step: str) -> Dict | List | None:
+    """
+    Extract the relevant artifact from a graph state chunk based on the completed step.
+
+    Maps each workflow step to its corresponding state field and returns
+    the artifact in a format suitable for SSE delivery to the frontend.
+
+    Args:
+        state: Full graph state snapshot from graph.stream(stream_mode="values")
+        completed_step: The step that just finished (e.g., "retrieving_context")
+
+    Returns:
+        - retrieving_context: List of file paths retrieved from the repo
+        - planning: Execution plan dict with file groups and modification details
+        - coding: List of generated file dicts with path and content
+        - None if the step has no artifact or the field is missing from state
+    """
+
+    if completed_step == "retrieving_context":
+        files = state.get("retrieved_files")
+        return [file["file_path"] for file in files]
+    
+    if completed_step == "planning":
+        plan = state.get("execution_plan")
+        return plan
+    
+    if completed_step == "coding":
+        generated_files = state.get("generated_files")
+        return generated_files
+
+    if completed_step == "failed":
+        errors = state.get("errors")
+        if errors:
+            latest = errors[-1]
+            return { # E.g. step='retrieving_context', error_type='tool_error', message='404'
+                "step": latest.step,
+                "error_type": latest.error_type,
+                "message": latest.message,
+            }
+        return None
+
 async def run_strategies(
     arena_trace_id: str,
     states: list,
-    github_token: str
+    github_token: str,
+    queue: asyncio.Queue
 ) -> list[StrategyResult]:
     """Run all 3 strategies in parallel"""
 
@@ -202,49 +199,56 @@ async def run_strategies(
 
     # Execute all strategies in parallel
     results = await asyncio.gather(
-        *[run_strategy(arena_trace_id, state, graph) 
+        *[run_strategy(arena_trace_id, state, graph, queue) 
           for state, graph in zip(states, graphs)]
     )
 
     return results
 
-@router.post("/", response_model=ArenaResponse)
+async def _event_stream(queue, states):
+    """
+    Async generator that streams SSE events to the frontend.
+
+    Consumes step update events from the shared queue as strategies progress,
+    yielding each as a SSE-formatted data string. Tracks completed strategies
+    and emits a final 'done' event once all strategies reach a terminal state
+    (completed or failed).
+    """
+    
+    completed = 0
+    while completed < len(states):
+        event = await queue.get()
+        yield f"data: {json.dumps(event)}\n\n"
+        if event["current_step"] in ("completed", "failed"):
+            completed += 1
+    
+    yield f"data: {json.dumps({'event': 'done'})}\n\n"
+
+@router.post("/stream")
 async def run_arena(request: ArenaRequest):
     """Run Arena: 3 strategies compete on the same task"""
 
     arena_trace_id = f"arena-{uuid.uuid4()}"
     logger.info(f"Arena started: {arena_trace_id}, repo={request.repo_name}")
     
-    # Track Arena started
-    track_arena_started(arena_trace_id, request)
-
     try:
-        # Create 3 states
         states = create_arena_states(arena_trace_id, request)
-
-        # Run all 3 in parallel
-        start_time = time.time()
-        results = await run_strategies(
+        queue = asyncio.Queue()
+        
+        asyncio.create_task(
+            run_strategies(
             arena_trace_id,
             states,
-            request.github_token.get_secret_value()
-        )
+            request.github_token.get_secret_value(),
+            queue
+        ))
 
-        duration = int(time.time() - start_time)
-        logger.info(f"Arena completed: {arena_trace_id} in {duration}s")
-
-        track_arena_completed(arena_trace_id, duration, results)
-
-        return ArenaResponse(
-            arena_trace_id=arena_trace_id,
-            duration_seconds=duration,
-            strategies=results
+        return StreamingResponse(
+            _event_stream(queue, states),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
         )
 
     except Exception as e:
         logger.error(f"Arena failed: {arena_trace_id}, error: {e}")
-        
-        # Track Arena failed
-        track_arena_failed(arena_trace_id, e)
-        
         raise HTTPException(status_code=500, detail=f"Arena failed: {str(e)}")
