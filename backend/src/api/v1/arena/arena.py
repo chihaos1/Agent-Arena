@@ -3,6 +3,7 @@ import logging
 import json
 import time
 import uuid
+from datetime import datetime
 from typing import Dict, List
 
 from fastapi import APIRouter, HTTPException
@@ -44,6 +45,10 @@ def create_arena_states(
         states.append(state)
     
     return states
+
+# ============================================
+# Running each strategy
+# ============================================
 
 async def run_strategy(
     arena_trace_id: str,
@@ -116,25 +121,40 @@ def _stream_graph(graph, state, config, queue, version_id):
         current_step = state.get("current_step")
         completed_step = state.get("completed_step")
 
-        if current_step == "failed" and last_completed != "failed":
-            queue.put_nowait({
-                "version_id": version_id,
-                "completed_step": "failed",
-                "current_step": "failed",
-                "artifact": _extract_artifact(state, "failed")
-            })
+        if current_step == "failed" and last_completed != "failed": # For capturing failed at step in artifact
+            queue.put_nowait(_build_event(version_id, "failed", "failed", state))
             last_completed = "failed"
+
         elif completed_step and completed_step != last_completed:
-            queue.put_nowait({
-                "version_id": version_id,
-                "completed_step": completed_step,
-                "current_step": current_step,
-                "artifact": _extract_artifact(state, completed_step)
-            })
+            queue.put_nowait(_build_event(version_id, completed_step, current_step, state))
             last_completed = completed_step
 
         last_chunk = state
     return last_chunk
+
+def _build_event(version_id: str, completed_step: str, current_step: str, state: dict) -> dict:
+    """Build SSE queue payload for a step completion."""
+    
+    is_terminal = current_step in ("completed", "failed")
+    return {
+        "version_id": version_id,
+        "completed_step": completed_step,
+        "current_step": current_step,
+        "artifact": _extract_artifact(state, completed_step),
+        "summary": _build_summary(state) if is_terminal else None
+    }
+
+def _build_summary(state: dict) -> dict | None:
+    """Build terminal step summary for scoreboard. Only called on completed/failed."""
+    
+    errors = state.get("errors", [])
+    return {
+        "estimated_cost_usd": state.get("estimated_cost_usd"),
+        "tool_call_counts": state.get("tool_call_counts"),
+        "pr_url": state.get("pr_url"),
+        "duration_seconds": (datetime.now() - state.get("started_at")).total_seconds(),
+        "failed_at_step": errors[-1].step if errors else None,
+    }
 
 def _extract_artifact(state: dict, completed_step: str) -> Dict | List | None:
     """
@@ -177,6 +197,10 @@ def _extract_artifact(state: dict, completed_step: str) -> Dict | List | None:
             }
         return None
 
+# ============================================
+# Running all strategies
+# ============================================
+
 async def run_strategies(
     arena_trace_id: str,
     states: list,
@@ -204,6 +228,10 @@ async def run_strategies(
     )
 
     return results
+
+# ============================================
+# Streaming response
+# ============================================
 
 async def _event_stream(queue, states):
     """

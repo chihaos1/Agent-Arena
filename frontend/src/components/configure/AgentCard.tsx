@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 
 export interface AgentConfig {
@@ -12,6 +13,8 @@ interface AgentCardProps {
     launched: boolean
     config: AgentConfig
     onChange: (config: AgentConfig) => void
+    allFinished?: boolean
+    summary?: Record<string, any>
 }
 
 const MODELS = [
@@ -20,13 +23,14 @@ const MODELS = [
   { label: 'Gemini Flash 2.5', value: 'gemini/gemini-2.5-flash' },
 ]
 
-export default function AgentCard({ agentNumber, launched, config, onChange }: AgentCardProps) {
+export default function AgentCard({ agentNumber, launched, config, onChange, allFinished, summary }: AgentCardProps) {
 
     const modelLabel = MODELS.find(m => m.value === config.model)?.label ?? config.model
+    const [expanded, setExpanded] = useState<boolean>(false)
 
     return (
         <motion.div 
-            className="flex-1 flex flex-col bg-neon-purple rounded-lg border-2 border-neon-teal/30 p-4 font-space-mono">
+            className="relative flex-1 flex flex-col bg-neon-purple rounded-lg border-2 border-neon-teal/30 p-4 font-space-mono z-2">
             <h2 className="text-neon-teal font-bold tracking-widest uppercase mb-2">
                 Agent {agentNumber}
             </h2>
@@ -60,7 +64,7 @@ export default function AgentCard({ agentNumber, launched, config, onChange }: A
                                 <select
                                     value={config.model}
                                     onChange={e => onChange({ ...config, model: e.target.value})}
-                                    className="bg-white/10 border border-neon-teal/50 rounded px-3 py-2 text-white text-sm w-full mt-1 focus:outline-none focus:border-neon-teal placeholder-muted"
+                                    className="bg-white/10 border border-neon-teal/50 rounded px-3 py-2 text-white text-sm w-full mt-1 focus:outline-none focus:border-neon-teal placeholder-muted cursor-pointer"
                                 >
                                     {MODELS.map(m => (
                                         <option 
@@ -101,6 +105,40 @@ export default function AgentCard({ agentNumber, launched, config, onChange }: A
                     
                     
                 </div>
+            </div>
+
+            {/* Expand Toggle */}
+            {allFinished && (
+                <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    transition={{ duration: 0.4 }}
+                    className="overflow-hidden"
+                >
+                    <hr className="mt-4 mb-4"></hr>
+                    <button
+                        onClick={() => setExpanded(prev => !prev)}
+                        className="text-xs text-muted tracking-widest uppercase hover:text-neon-teal transition-colors cursor-pointer w-full text-left"
+                    >
+                        {expanded ? '▼ Results' : '▲ Results'}
+                    </button>
+                </motion.div>
+            )}
+
+            {/* Expanded Section */}
+            <div className="absolute left-5 right-5 top-full overflow-hidden z-20" style={{ top: 'calc(100% + 0.5px)' }}>
+                {expanded && (
+                    <motion.div
+                        initial={{ y: '-100%' }}
+                        animate={{ y: 0 }}
+                        transition={{ duration: 0.1, ease: "easeOut" }}
+                        className="bg-neon-purple border-2 border-neon-teal/30 rounded-b-lg p-4"
+                    >
+                        <div className="text-xs text-muted">
+                            content goes here
+                        </div>
+                    </motion.div>
+                )}
             </div>
         </motion.div>
     )
