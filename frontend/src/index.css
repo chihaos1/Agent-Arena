@@ -79,3 +79,12 @@ body {
   border-radius: 999px;
   background: #00ffa3;
 }
+
+/* Rechart */
+
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible,
+.recharts-surface:focus,
+.recharts-surface:focus-visible {
+    outline: none !important;
+}

@@ -149,10 +149,10 @@ def _build_summary(state: dict) -> dict | None:
     
     errors = state.get("errors", [])
     return {
-        "estimated_cost_usd": state.get("estimated_cost_usd"),
+        "estimated_cost_usd": f"${state.get("estimated_cost_usd")}",
         "tool_call_counts": state.get("tool_call_counts"),
         "pr_url": state.get("pr_url"),
-        "duration_seconds": (datetime.now() - state.get("started_at")).total_seconds(),
+        "duration_seconds": f"{round((datetime.now() - state.get("started_at")).total_seconds(), 2)}s",
         "failed_at_step": errors[-1].step if errors else None,
     }
 

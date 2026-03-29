@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence  } from 'framer-motion'
 
 export interface AgentConfig {
     model: string
@@ -30,7 +30,7 @@ export default function AgentCard({ agentNumber, launched, config, onChange, all
 
     return (
         <motion.div 
-            className="relative flex-1 flex flex-col bg-neon-purple rounded-lg border-2 border-neon-teal/30 p-4 font-space-mono z-2">
+            className="relative flex-1 flex flex-col bg-neon-purple rounded-lg border-2 border-neon-teal/30 p-4 font-space-mono">
             <h2 className="text-neon-teal font-bold tracking-widest uppercase mb-2">
                 Agent {agentNumber}
             </h2>
@@ -77,12 +77,12 @@ export default function AgentCard({ agentNumber, launched, config, onChange, all
                             </> 
                     }
                 </div>
+
                 <div>
                     {launched 
                         ?   <div className="flex items-center justify-between gap-2">
                                 <label className="block text-left mb-1 text-muted text-xs uppercase tracking-widest">Temperature:</label> 
                                     <p className="text-white text-xs mt-1"><strong>{config.temperature.toFixed(1)}</strong></p>
-                            
                             </div>
                             
                         :   <>
@@ -102,8 +102,6 @@ export default function AgentCard({ agentNumber, launched, config, onChange, all
                                 </div>
                             </>
                     }
-                    
-                    
                 </div>
             </div>
 
@@ -118,7 +116,7 @@ export default function AgentCard({ agentNumber, launched, config, onChange, all
                     <hr className="mt-4 mb-4"></hr>
                     <button
                         onClick={() => setExpanded(prev => !prev)}
-                        className="text-xs text-muted tracking-widest uppercase hover:text-neon-teal transition-colors cursor-pointer w-full text-left"
+                        className="text-xs text-muted tracking-widest uppercase text-neon-teal transition-colors cursor-pointer w-full text-left"
                     >
                         {expanded ? '▼ Results' : '▲ Results'}
                     </button>
@@ -127,18 +125,55 @@ export default function AgentCard({ agentNumber, launched, config, onChange, all
 
             {/* Expanded Section */}
             <div className="absolute left-5 right-5 top-full overflow-hidden z-20" style={{ top: 'calc(100% + 0.5px)' }}>
-                {expanded && (
+                <AnimatePresence>
+                    {expanded && (
                     <motion.div
                         initial={{ y: '-100%' }}
                         animate={{ y: 0 }}
+                        exit={{ y: '-100%' }}
                         transition={{ duration: 0.1, ease: "easeOut" }}
-                        className="bg-neon-purple border-2 border-neon-teal/30 rounded-b-lg p-4"
+                        className="bg-neon-purple/95 border-2 border-neon-teal/30 rounded-b-lg p-4"
+                        style={{
+                            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.20) 1px, transparent 1px)',
+                            backgroundSize: '16px 16px'
+                        }}
                     >
-                        <div className="text-xs text-muted">
-                            content goes here
+                        <div className="flex flex-col gap-4">
+                            <div className="flex items-center justify-between gap-2"> 
+                                <label className="text-muted text-xs uppercase tracking-widest">Status:</label>
+                                <p className="text-white text-xs mt-1"><strong className={`${summary?.failed_at_step ? 'text-red-400' : 'text-green-400'}`}>{summary?.failed_at_step ? 'Failed' : 'Completed'}</strong></p>
+                            </div>
+                            <div className="flex items-center justify-between gap-2"> 
+                                <label className="text-muted text-xs uppercase tracking-widest">Duration:</label>
+                                <p className="text-white text-xs mt-1">{summary?.duration_seconds ?? '—'}</p>
+                            </div>
+                            <div className="flex items-center justify-between gap-2"> 
+                                <label className="text-muted text-xs uppercase tracking-widest">Cost:</label>
+                                <p className="text-white text-xs mt-1">{summary?.estimated_cost_usd ?? '—'}</p>
+                            </div>
+                            <div className="flex items-center justify-between gap-2"> 
+                                <label className="text-muted text-xs uppercase tracking-widest">Files:</label>
+                                <p className="text-white text-xs mt-1">{summary?.files_generated ?? '—'}</p>
+                            </div>
+                            {summary?.pr_url && (
+                                <>
+                                    <hr />
+                                    <a
+                                        href={summary.pr_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs text-white hover:underline text-right font-bold block"
+                                    >
+                                        View PR →
+                                    </a>
+                                </>
+                                
+                            )}
                         </div>
+                        
                     </motion.div>
                 )}
+                </AnimatePresence>
             </div>
         </motion.div>
     )

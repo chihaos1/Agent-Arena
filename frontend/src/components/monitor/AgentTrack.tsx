@@ -56,6 +56,7 @@ export default function AgentTrack({ agentNumber, currentStep, artifacts }: Agen
     return (
         <div className="relative flex flex-col gap-10 font-space-mono">
             
+            {/* Progress Bar */}
             <div 
                 className="absolute left-1/2 top-10 bottom-10 -translate-x-1/2 w-1 bg-neon-teal/20 z-0"
                 aria-hidden="true"
