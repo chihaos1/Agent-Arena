@@ -3,7 +3,7 @@ from core.logging import setup_logging
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.v1.repo import token, issue, embed
+from api.v1.repo import token, embed, create_issue
 from api.v1.agents import context, plan, orchestrate
 from api.v1.arena import arena
 from core.config import settings
@@ -27,8 +27,8 @@ app.add_middleware(
 
 # Repo Routes
 app.include_router(token.router)
-app.include_router(issue.router)
 app.include_router(embed.router)
+app.include_router(create_issue.router)
 
 # Agent Routes
 app.include_router(context.router)

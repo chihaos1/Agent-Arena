@@ -9,6 +9,7 @@ from typing import Dict, List
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from core.config import settings
 from schemas.request.arena.arena import ArenaRequest
 from schemas.response.arena.arena import StrategyResult
 from services.graph.state import create_initial_state
@@ -34,7 +35,6 @@ def create_arena_states(
             issue_id=request.issue_id,
             issue_description=request.issue_description,
             repo_name=request.repo_name,
-            branch_name="main",
             session_id=str(uuid.uuid4()),
             arena_trace_id=arena_trace_id,
             version_id=strategy.version_id,
@@ -267,7 +267,7 @@ async def run_arena(request: ArenaRequest):
             run_strategies(
             arena_trace_id,
             states,
-            request.github_token.get_secret_value(),
+            settings.GITHUB_TOKEN.get_secret_value(),
             queue
         ))
 

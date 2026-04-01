@@ -85,6 +85,7 @@ export default function PhaseFunnel() {
                         panOnDrag={false}
                         style={{ background: '#111111' }}
                         proOptions={{ hideAttribution: true }}
+                        zoomOnScroll={ false }
                     >
                         <Background color="#00ffa3" gap={16} size={1} />
                     </ReactFlow>

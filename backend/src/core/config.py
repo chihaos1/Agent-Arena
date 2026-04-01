@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AutoDev"
     API_VERSION: str = "v1"
 
+    # GitHub Settings
+    GITHUB_TOKEN: SecretStr
+
     # Claude Settings
     ANTHROPIC_API_KEY: SecretStr
     CLAUDE_MODEL: str

@@ -398,7 +398,6 @@ def create_initial_state(
     issue_id: str,
     issue_description: str,
     repo_name: str,
-    branch_name: str,
     session_id: str,
     arena_trace_id: str,
     version_id: str,
@@ -462,7 +461,7 @@ def create_initial_state(
         issue_id=issue_id,
         issue_description=issue_description,
         repo_name=repo_name,
-        branch_name=branch_name,
+        branch_name="master",
         session_id=session_id,
 
         # Arena grouping

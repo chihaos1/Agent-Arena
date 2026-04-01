@@ -126,6 +126,8 @@ export default function AgentTrack({ agentNumber, currentStep, artifacts }: Agen
                     onClose={() => setSelectedArtifact(null)}
                 />
             )}
+
         </div>
+        
     )
 }

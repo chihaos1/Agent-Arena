@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList  } from "recharts"
 
 const MODEL_COLORS: Record<string, string> = {
@@ -89,7 +89,7 @@ export default function TokenChart() {
                 <p className="text-muted text-xs">Input vs output tokens per phase, by model.</p>
             </div>
 
-            <div className="h-[280px] border-2 border-neon-teal/50 bg-neon-purple rounded-lg"
+            <div className="h-[280px] min-h-[280px] border-2 border-neon-teal/50 bg-neon-purple rounded-lg"
             >
                 <ResponsiveContainer width="100%" height="100%" >
                     <BarChart 
@@ -141,7 +141,7 @@ export default function TokenChart() {
                             }}
                         />
                         {models.map(model => (
-                            <>
+                            <Fragment key={model}>
                                 <Bar key={`${model}_input`} dataKey={`${model}_input`} stackId={model} fill={MODEL_COLORS[model] ?? "#888"} radius={[0, 0, 0, 0]} activeBar={false}>
                                     <LabelList
                                         dataKey={`${model}_input`}
@@ -158,7 +158,7 @@ export default function TokenChart() {
                                         style={{ fontSize: 9, fontFamily: 'Space Mono', fill: '#ffffff' }}
                                     />
                                 </Bar>
-                            </>
+                            </Fragment>
                         ))}
                     </BarChart>
                 </ResponsiveContainer>

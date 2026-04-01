@@ -75,7 +75,7 @@ export default function CostChart() {
                 <p className="text-muted text-xs">Total LLM cost per phase, by model.</p>
             </div>
 
-            <div className="h-[280px] border-2 border-neon-teal/50 bg-neon-purple rounded-lg"
+            <div className="h-[280px] min-h-[280px] border-2 border-neon-teal/50 bg-neon-purple rounded-lg"
             >
                 <ResponsiveContainer width="100%" height="100%" >
                     <BarChart 

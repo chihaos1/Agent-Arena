@@ -74,14 +74,6 @@ class ArenaRequest(BaseModel):
         )
     ]
 
-    github_token: Annotated[
-        SecretStr,
-        Field(
-            description="GitHub Personal Access Token (masked in logs)",
-            examples=["github_pat_00SAMPLE08ww7ySr3Kb6S_AAAV68ftALK3c6Q0JI4dPnGmyWBD6JpuEIjr30vpR1MYVMG4B65MVfx6jtH"]
-        )
-    ]
-
     strategies: Annotated[
         list[StrategyConfig],
         Field(

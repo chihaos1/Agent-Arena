@@ -14,13 +14,13 @@ export default function InsightsPage({ onClose }: InsightsPageProps) {
                     <span className="text-m tracking-widest">Insights</span> 
                 </div>
             </div>
-            <div className="flex flex-col gap-6 mt-4">
+            <div className="flex flex-col gap-6 mt-3">
                 <PhaseFunnel />
                 <CostChart />
                 <TokenChart />
             </div>
             <button 
-                className="w-64 flex items-center justify-center mt-8 font-space-mono font-bold text-sm tracking-widest uppercase py-3 rounded border border-neon-teal text-neon-teal hover:bg-neon-teal hover:text-black hover:scale-105 transition-all duration-200 cursor-pointer"
+                className="w-64 mt-8 font-space-mono font-bold text-sm tracking-widest uppercase py-3 text-neon-teal hover:scale-105 transition-all duration-200 cursor-pointer"
                 onClick={onClose}
             >
                 ← Back

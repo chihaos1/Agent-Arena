@@ -7,6 +7,7 @@ interface TreeItem {
 
 interface RepoData {
     name: string; 
+    html_url: string;
     description: string; 
     stargazers_count: number; 
     forks_count: number; 
@@ -91,8 +92,8 @@ export default function RepoPreview() {
         const load = async () => {
             try {
                 const [repoRes, treeRes] = await Promise.all([
-                    fetch('https://api.github.com/repos/chihaos1/ThinkNode-Test', { headers }),
-                    fetch('https://api.github.com/repos/chihaos1/ThinkNode-Test/git/trees/main?recursive=1', { headers })
+                    fetch('https://api.github.com/repos/chihaos1/jira_clone', { headers }),
+                    fetch('https://api.github.com/repos/chihaos1/jira_clone/git/trees/master?recursive=1', { headers })
                 ])
 
                 if (!repoRes.ok || !treeRes.ok) throw new Error("Failed to fetch data")
@@ -122,10 +123,14 @@ export default function RepoPreview() {
 
     return (
         <div className="h-[75vh] flex flex-col items-center bg-neon-purple rounded-lg border-2 border-neon-teal/30 p-4 font-space-mono overflow-hidden">
-            <div className="mb-4 ">
-                <h2 className="text-xl font-semibold text-white">{repo.name}</h2>
-                <p className="text-gray-400 text-sm mt-1">{repo.description}</p>
-                <div className="flex justify-between mt-2 text-xs">
+            <div className="mb-4">
+                <h2 className="text-xl font-semibold text-white">
+                    <a href={repo.html_url} target="_blank" rel="noopener noreferrer" className="hover:text-neon-teal transition-colors">
+                        {repo.name}    
+                    </a>
+                </h2>
+                <p className="text-gray-350 text-xs mt-2">{repo.description}</p>
+                <div className="flex justify-around mt-2 text-xs">
                     <span>⭐ {repo.stargazers_count}</span>
                     <span>🍴 {repo.forks_count}</span>
                     <span>🐛 {repo.open_issues_count}</span>

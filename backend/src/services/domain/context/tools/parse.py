@@ -53,8 +53,19 @@ class CodeParser:
                         "interface_declaration", "type_alias_declaration",
                         "lexical_declaration", "return_statement"
                     }
+                case "js" | "jsx":
+                    parser = self.parsers["tsx"]
+                    targets = {
+                        "import_statement", "export_statement",
+                        "function_declaration", "class_declaration",
+                        "interface_declaration", "type_alias_declaration",
+                        "lexical_declaration", "return_statement"
+                    }
                 case _:
-                    return "\n".join(lines[:50])
+                    return {
+                        "signatures": "\n".join(lines[:50]),
+                        "imports": []
+                    }
             
             tree = parser.parse(bytes(content, "utf8"))
             signatures, imports = [], []
@@ -66,7 +77,10 @@ class CodeParser:
             }
         
         except Exception as e:
-            return "\n".join(content.splitlines()[:50])
+            return {
+                "signatures": "\n".join(lines[:50]),
+                "imports": []
+            }
 
     def _walk(self, node: Node, content:str, lines: list, signatures: list, imports: list, targets: set, seen=None):
         """
@@ -84,7 +98,6 @@ class CodeParser:
             imports: List of imported libraries or scripts.
             targets: Node types to capture (e.g., 'class_definition').
             seen: Set of line indices already processed to prevent duplicates.
-        
         """
 
         if seen is None:

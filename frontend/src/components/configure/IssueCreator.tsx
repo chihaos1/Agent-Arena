@@ -12,7 +12,7 @@ export default function IssueCreator({ onIssueSaved }: IssueCreatorProps) {
         <div className="h-full flex flex-col bg-neon-purple rounded-lg border-2 border-neon-teal/30 p-4 font-space-mono overflow-hidden">
             <div className="mb-4">
                 <h2 className="text-xl font-bold text-white tracking-widest uppercase">Create Issue</h2>
-                <p className="text-muted text-sm mt-1 text-center">Create a new Github issue to ThinkNode-Test</p>
+                <p className="text-muted text-sm mt-1 text-center">Create a new Github issue to jira_clone</p>
             </div>
             <div className="flex flex-col flex-1 gap-4">
                 <input
