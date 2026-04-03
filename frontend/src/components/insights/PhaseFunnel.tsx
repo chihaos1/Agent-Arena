@@ -20,7 +20,7 @@ export default function PhaseFunnel() {
     // Fetch Funnel data from PostHog
     useEffect(() => {
         const fetchFunnel = async() => {
-            const response = await fetch("http://127.0.0.1:8000/insights/funnel")
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/insights/funnel`)
             const data = await response.json()
             setData(data)
             setSelectedModel(data.result[0][0].breakdown_value[0])

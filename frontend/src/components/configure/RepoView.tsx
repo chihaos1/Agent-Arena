@@ -90,7 +90,7 @@ export default function RepoPreview() {
     useEffect(() => {
         const load = async () => {
             try {
-                const response = await fetch("http://127.0.0.1:8000/repo/repo-preview")
+                const response = await fetch(`${import.meta.env.VITE_API_URL}/repo/repo-preview`)
 
                 if (!response.ok) throw new Error("Failed to fetch data")
 

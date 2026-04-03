@@ -56,7 +56,7 @@ function App() {
 	})
 
 	const createGithubIssue = async(): Promise<number> => {
-		const issueResponse = await fetch(`http://127.0.0.1:8000/repo/create-issue`, {
+		const issueResponse = await fetch(`${import.meta.env.VITE_API_URL}/repo/create-issue`, {
 			method: "POST",
 			headers: {
             	'Content-Type': 'application/json'
@@ -73,7 +73,7 @@ function App() {
 	}
 
 	const streamArenaRun = async(issueNumber: number) => {
-		const arenaResponse = await fetch("http://127.0.0.1:8000/arena/stream", {
+		const arenaResponse = await fetch(`${import.meta.env.VITE_API_URL}/arena/stream`, {
 			method: "POST",
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({

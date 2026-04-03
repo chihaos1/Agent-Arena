@@ -20,7 +20,7 @@ export default function TokenChart() {
 
     useEffect(() => {
         const fetchTokens = async () => {
-            const response = await fetch("http://127.0.0.1:8000/insights/events")
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/insights/events`)
             const data = await response.json()
 
             // Track input and output tokens by model (e.g. { "gpt-4o": { "planning": { input: 1200, output: 340 } } })
