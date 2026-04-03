@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 from github import Github
 
@@ -36,7 +37,7 @@ def create_pull_request(
         base_sha = repo.get_branch(base_branch).commit.sha
 
         # 2. Create new branch
-        branch_name = f"autodev/{issue_id}-{strategy_name.replace(" ", "-")}"
+        branch_name = f"autodev/{issue_id}-{strategy_name.replace(" ", "-")}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         repo.create_git_ref(
             ref=f"refs/heads/{branch_name}",
             sha=base_sha
