@@ -20,14 +20,7 @@ export default function TokenChart() {
 
     useEffect(() => {
         const fetchTokens = async () => {
-            const response = await fetch(
-                `https://app.posthog.com/api/projects/340866/events/?event=%24ai_generation&limit=1000`,
-                {
-                    headers: {
-                        'Authorization': `Bearer ${import.meta.env.VITE_POSTHOG_API_KEY}`,
-                    }
-                }
-            )   
+            const response = await fetch("http://127.0.0.1:8000/insights/events")
             const data = await response.json()
 
             // Track input and output tokens by model (e.g. { "gpt-4o": { "planning": { input: 1200, output: 340 } } })

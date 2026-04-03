@@ -50,6 +50,9 @@ class Settings(BaseSettings):
 
     # PostHog Settings
     POSTHOG_API_KEY: SecretStr
+    POSTHOG_PERSONAL_API_KEY: SecretStr
     POSTHOG_HOST: str
+    POSTHOG_PROJECT_ID: str
+    POSTHOG_FUNNEL_INSIGHT_ID: str
 
 settings: Settings = Settings()

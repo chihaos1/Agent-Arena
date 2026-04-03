@@ -82,29 +82,21 @@ function TreeView({ nodes, depth = 0 }: { nodes: TreeNodes; depth?: number }) {
 }
 
 export default function RepoPreview() {
-    const headers = { Authorization: `Bearer ${import.meta.env.VITE_GITHUB_TOKEN}`}
     
     const [repo, setRepo] = useState<RepoData | null>(null)
     const [tree, setTree] = useState<TreeItem[]>([])
     const [error, setError] = useState<string | null>(null)
-
+    
     useEffect(() => {
         const load = async () => {
             try {
-                const [repoRes, treeRes] = await Promise.all([
-                    fetch('https://api.github.com/repos/chihaos1/jira_clone', { headers }),
-                    fetch('https://api.github.com/repos/chihaos1/jira_clone/git/trees/master?recursive=1', { headers })
-                ])
+                const response = await fetch("http://127.0.0.1:8000/repo/repo-preview")
 
-                if (!repoRes.ok || !treeRes.ok) throw new Error("Failed to fetch data")
+                if (!response.ok) throw new Error("Failed to fetch data")
 
-                const [repoData, treeData] = await Promise.all([
-                    repoRes.json() as Promise<RepoData>,
-                    treeRes.json() as Promise<{ tree: TreeItem[] }>
-                ])
-
-                setRepo(repoData)
-                setTree(treeData.tree ?? [])
+                const data = await response.json()
+                setRepo(data.repo)
+                setTree(data.tree)
 
             } catch (error) {
                 console.error("Tree Fetch Error:", error)
@@ -113,11 +105,11 @@ export default function RepoPreview() {
         }
         load()
     }, [])
-    
+
     if (error) return <div className="text-red-400 p-4">{error}</div>
     if (!repo) return (
-        <div className="flex items-center justify-center h-full text-gray-400">
-        Loading...
+        <div className="h-[75vh] flex items-center justify-center bg-neon-purple rounded-lg border-2 border-neon-teal/30 font-space-mono text-neon-teal font-bold">
+            Loading...
         </div>
     )
 

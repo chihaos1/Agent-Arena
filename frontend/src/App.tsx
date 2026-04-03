@@ -128,7 +128,6 @@ function App() {
 
 		try {
 			const issueNumber = await createGithubIssue()
-			console.log(issueNumber)
 			await streamArenaRun(issueNumber)
 		} catch(err) {
 			toast.error('Failed to launch run')
@@ -175,7 +174,7 @@ function App() {
 						{!launched && (
 							<>
 								{/* Repo Viewer, Issue Creator, and Agent Configs */}
-								<div className="max-h-[75vh] flex gap-4 flex-1 overflow-hidden mt-[5vh]">
+								<div className="h-[75vh] flex gap-4 flex-1 overflow-hidden mt-[5vh]">
 									<AnimatePresence>
 										<motion.div 
 											key="repo-panel"
@@ -192,7 +191,7 @@ function App() {
 									<div className={`${animComplete  ? 'w-full' : 'w-[70%]'} flex flex-col gap-4 overflow-hidde`}>	
 										<AnimatePresence>
 											<motion.div
-												className="flex flex-col gap-4 flex-1 overflow-hidden"
+												className="flex flex-col gap-4 flex-1 h-full overflow-hidden"
 												exit={{ x: '120%', opacity: 0 }}
 												transition={{ duration: animationDuration, ease: 'easeInOut' }}
 											>
