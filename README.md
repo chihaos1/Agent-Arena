@@ -1,6 +1,31 @@
 # Agent Arena
 A multi-model benchmarking platform that races GPT-4o, Claude Sonnet, and Gemini Flash on the same GitHub issue. Compares cost, speed, and quality in real time, instrumented with PostHog LLM observability.
 
+## Table of Contents
+
+- [Demo](#demo)
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Insights — Dogfooding in Action](#insights--dogfooding-in-action)
+- [Roadmap](#roadmap)
+
+## Demo
+
+The general flow of Agent Arena from creating a GitHub issue to launching 3 competing AI agents. Shows the process of context retrieval → planning → coding → PR creation.
+
+[![Agent Arena Demo](https://img.youtube.com/vi/Qj8r42F1ZIw/0.jpg)](https://www.youtube.com/watch?v=Qj8r42F1ZIw)
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Backend | FastAPI, LangGraph, LiteLLM, asyncio |
+| Frontend | React, TypeScript, Vite, Tailwind CSS |
+| LLM Models | GPT-4o, Claude Sonnet, Gemini Flash |
+| Retrieval | Pinecone (semantic search) |
+| Observability | PostHog (`$ai_generation` events) |
+| Visualization | Recharts, React Flow |****
+
 ## Architecture
 ### Backend
 
@@ -48,3 +73,31 @@ The frontend is a React application built on Typescript and Tailwind CSS.
   - **Phase Funnel** — React Flow visualization showing conversion rate across pipeline phases per model
   - **Cost Breakdown** — grouped bar chart showing total LLM cost per phase by model
   - **Token Usage** — stacked bar chart showing input vs output token split per phase by model
+ 
+## Insights — Dogfooding in Action
+
+Agent Arena instruments itself. Every LLM call in the pipeline emits a `$ai_generation` event, and the Insights page surfaces that telemetry in the UI with cost, tokens, latency, and success rate broken down by phase and model.
+
+> **Note:** These numbers reflect a small sample of test runs on a single sandbox repo, not a production-grade benchmark. The goal isn't to crown a "best model" but to demonstrate what becomes visible when you instrument your AI pipeline properly.
+
+### Insights Dashboard
+<img width="1050" height="857" alt="agent-arena-insights" src="https://github.com/user-attachments/assets/7d657ed6-f01c-4b60-ab28-15043aefe7e9" />
+
+### What the data surfaced
+
+**Reliability varies across models.** Claude Sonnet showed the strongest pipeline conversion (80%), rarely failing once it cleared context retrieval. GPT-4o landed in the middle (59%), with occasional failures at both ends of the pipeline. Gemini Flash started the most runs but finished the fewest (32%) suggesting it compensates for lower quality with more retries in the ReAct loop.
+
+**Cost alone is misleading.** Gemini Flash is the cheapest per call, but its low conversion rate means a lot of that spend goes toward failed runs. Claude Sonnet is the most expensive per call, but its higher reliability makes the cost-per-successful-PR more competitive than the raw numbers suggest. Without observability, users would only see the per-call price and miss the bigger picture.
+
+**Token patterns reveal strategy differences.** Claude Sonnet consumed significantly more input tokens, especially during planning and context retrieval. This indicates it reads more context before acting. The other models were more balanced between input and output. This heavier upfront investment in context likely contributes to Claude's higher completion rate.
+
+### The point
+
+None of these insights was obvious before instrumentation. LLM observability gives users visibility into cost, tokens, latency, and success rate per phase, per model, so they can make informed decisions about which models to use, where the  pipeline is breaking, and where the budget is actually going.
+
+## Roadmap
+
+- **Custom Repo Support** — allow users to connect their own GitHub repositories instead of running against a fixed sandbox repo, so they can benchmark models on their actual codebase and issues
+- **Sandbox Execution (Testing)** — add a containerized runtime that executes each model's generated code before PR creation, validating that the output actually runs and passes tests rather than relying solely on code review
+- **Quality Scoring** — automated diff analysis to score each PR on correctness, code style, and completeness. Move from just "did it create a PR" to "was the PR actually good"
+- **Prompt Template Experimentation** — let users swap out system prompts per phase and compare how different prompt strategies affect cost, speed, and output quality across models
