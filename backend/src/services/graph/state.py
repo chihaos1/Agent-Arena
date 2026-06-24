@@ -418,7 +418,7 @@ def create_initial_state(
         arena_trace_id: Groups all 3 strategies together (same for A, B, C)
         version_id: "strategy_a", "strategy_b", or "strategy_c"
         strategy_name: Human-readable name (e.g., "GPT-4o Creative")
-        llm_model: LLM model to use (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+        llm_model: LLM model to use (e.g., "gpt-4o", "claude-sonnet-4-6")
         temperature: Sampling temperature (0.0 = deterministic, 0.7 = creative)
     
     Returns:
@@ -448,7 +448,7 @@ def create_initial_state(
         ...     session_id=str(uuid.uuid4()),  # DIFFERENT
         ...     version_id="strategy_b",
         ...     strategy_name="Claude Deterministic",
-        ...     model="claude-sonnet-4-20250514",
+        ...     model="claude-sonnet-4-6",
         ...     temperature=0.0
         ... )
     """

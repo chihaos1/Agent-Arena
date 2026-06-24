@@ -24,7 +24,7 @@ def create_plan_tool(strategy_name: str, model: str, temperature: float):
     
     Args:
         strategy_name: The name of the strategy that is being tested
-        model: LLM model to use (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+        model: LLM model to use (e.g., "gpt-4o", "claude-sonnet-4-6")
         temperature: Sampling temperature (0.0-1.0)
 
     Returns:

@@ -24,7 +24,7 @@ class StrategyConfig(BaseModel):
         str,
         Field(
             description="LLM model to use for this strategy",
-            examples=["gpt-4o", "claude-sonnet-4-20250514", "gpt-4o-mini"]
+            examples=["gpt-4o", "claude-sonnet-4-6", "gpt-4o-mini"]
         )
     ]
     
@@ -90,7 +90,7 @@ class ArenaRequest(BaseModel):
                 {
                     "version_id": "strategy_b",
                     "strategy_name": "Claude Deterministic",
-                    "model": "claude-sonnet-4-20250514",
+                    "model": "claude-sonnet-4-6",
                     "temperature": 0.0
                 },
                 {

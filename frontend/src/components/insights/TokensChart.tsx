@@ -4,13 +4,13 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 const MODEL_COLORS: Record<string, string> = {
     "gpt-4o": "#00ffa3",
     "gemini/gemini-2.5-flash": "#f43f5e",
-    "claude-sonnet-4-20250514": "#f59e0b"
+    "claude-sonnet-4-6": "#f59e0b"
 }
 
 const MODEL_LABELS: Record<string, string> = {
     "gpt-4o": "GPT-4o",
     "gemini/gemini-2.5-flash": "Gemini Flash",
-    "claude-sonnet-4-20250514": "Claude Sonnet"
+    "claude-sonnet-4-6": "Claude Sonnet"
 }
 
 const PHASE_ORDER = ["retrieving_context", "planning", "coding", "creating_pr"]

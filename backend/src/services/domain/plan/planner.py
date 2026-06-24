@@ -12,7 +12,7 @@ class PlannerAgent:
     """Creates execution plan with file grouping and retry logic"""
 
     def __init__(self, model: str = None, temperature: float = 0.0):
-        self.model = model or "claude-sonnet-4-20250514"
+        self.model = model or "claude-sonnet-4-6"
         self.temperature = temperature
         
     def create_plan(self, context: ContextAssemblerResponse) -> dict:

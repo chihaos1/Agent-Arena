@@ -32,7 +32,7 @@ const defaultAgentState = (): AgentState => ({
 
 const defaultAgents = [
 	{ model: 'gpt-4o', strategy_name: 'GPT-4o Deterministic', temperature: 0.0, version_id: 'strategy_a' },
-	{ model: 'claude-sonnet-4-20250514', strategy_name: 'Claude Deterministic', temperature: 0.0, version_id: 'strategy_b' },
+	{ model: 'claude-sonnet-4-6', strategy_name: 'Claude Deterministic', temperature: 0.0, version_id: 'strategy_b' },
 	{ model: 'gemini/gemini-2.5-flash', strategy_name: 'Gemini Flash Budget', temperature: 0.0, version_id: 'strategy_c' },
 ]
 

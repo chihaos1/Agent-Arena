@@ -19,7 +19,7 @@ interface AgentCardProps {
 
 const MODELS = [
   { label: 'GPT-4o', value: 'gpt-4o' },
-  { label: 'Claude Sonnet 4.5', value: 'claude-sonnet-4-20250514' },
+  { label: 'Claude Sonnet 4.6', value: 'claude-sonnet-4-6' },
   { label: 'Gemini Flash 2.5', value: 'gemini/gemini-2.5-flash' },
 ]
 

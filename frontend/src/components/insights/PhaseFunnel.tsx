@@ -8,7 +8,7 @@ import { FunnelNode } from './utils/FunnelNode'
 const MODEL_LABELS: Record<string, string> = {
     'gpt-4o': 'GPT-4o',
     'gemini/gemini-2.5-flash': 'Gemini Flash',
-    'claude-sonnet-4-20250514': 'Claude Sonnet',
+    'cclaude-sonnet-4-6': 'Claude Sonnet',
 }
 
 const nodeTypes = { funnel: FunnelNode }
@@ -22,6 +22,7 @@ export default function PhaseFunnel() {
         const fetchFunnel = async() => {
             const response = await fetch(`${import.meta.env.VITE_API_URL}/insights/funnel`)
             const data = await response.json()
+            console.log(data)
             setData(data)
             setSelectedModel(data.result[0][0].breakdown_value[0])
         }

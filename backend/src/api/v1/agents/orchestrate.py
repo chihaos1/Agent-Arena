@@ -39,7 +39,7 @@ async def orchestrate(request: OrchestrateRequest):
             repo_name=request.repo_name,
             branch_name="main",  # Or from request
             session_id=session_id,
-            llm_model="claude-sonnet-4-20250514"
+            llm_model="claude-sonnet-4-6"
         )
 
         # 2. Build graph with GitHub token

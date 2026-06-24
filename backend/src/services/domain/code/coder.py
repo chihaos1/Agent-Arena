@@ -14,7 +14,7 @@ class CoderAgent:
     """Generates code for a single file group"""
 
     def __init__(self, model: str = None, temperature: float = 0.0):
-        self.model = model or "claude-sonnet-4-20250514"
+        self.model = model or "claude-sonnet-4-6"
         self.temperature = temperature
 
     def generate_code(self, file_group: dict, understanding: str, issue: str, repo: Repository) -> dict:
